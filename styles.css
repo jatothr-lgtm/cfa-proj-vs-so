@@ -1,0 +1,252 @@
+/* Projection vs SO — design tokens shared with the CFA Suite and the reorder app so the suite and the
+   apps it fronts read as one system. Status colours never travel alone: every
+   band ships with a glyph and a text label. */
+
+:root{
+  color-scheme: light;
+  --bg:#f4f6f4; --surface:#ffffff; --surface-2:#fafbfa; --surface-3:#f1f4f2;
+  --ink:#16241d; --ink-2:#5b6b63; --ink-3:#8b9992;
+  --line:#e2e7e3; --line-2:#eef1ef;
+  --brand:#17603f; --brand-2:#1f7d53; --brand-ink:#ffffff;
+  --red:#c0392f;   --red-bg:#fdecea;
+  --amber:#a87f00; --amber-bg:#fdf3e2;
+  --green:#1f7d53; --green-bg:#e8f5ee;
+  --crit:#7f1d1d;  --crit-bg:#f6e4e4;
+  --s1:#2a78d6;    --s2:#eb6834;          /* identity, never status */
+  --reorder:#1d4f91; --reorder-bg:#e8eff9;
+  --shadow:0 1px 2px rgba(16,32,25,.05), 0 8px 24px rgba(16,32,25,.06);
+  --radius:12px;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    color-scheme: dark;
+    --bg:#0f1512; --surface:#161d19; --surface-2:#1b231e; --surface-3:#202a24;
+    --ink:#e6eee9; --ink-2:#9fb0a7; --ink-3:#78887f;
+    --line:#26302a; --line-2:#202a24;
+    --brand:#2c9a68; --brand-2:#35b47b; --brand-ink:#07110c;
+    --red:#f07167;   --red-bg:#3a1f1d;
+    --amber:#e8b13a; --amber-bg:#3a2e1a;
+    --green:#4fc38c; --green-bg:#123026;
+    --crit:#f79b90;  --crit-bg:#3a1a1a;
+    --s1:#3987e5;    --s2:#d95926;
+    --reorder:#7fb0ef; --reorder-bg:#16233a;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.35);
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme: dark;
+  --bg:#0f1512; --surface:#161d19; --surface-2:#1b231e; --surface-3:#202a24;
+  --ink:#e6eee9; --ink-2:#9fb0a7; --ink-3:#78887f;
+  --line:#26302a; --line-2:#202a24;
+  --brand:#2c9a68; --brand-2:#35b47b; --brand-ink:#07110c;
+  --red:#f07167; --red-bg:#3a1f1d; --amber:#e8b13a; --amber-bg:#3a2e1a;
+  --green:#4fc38c; --green-bg:#123026; --crit:#f79b90; --crit-bg:#3a1a1a;
+  --s1:#3987e5; --s2:#d95926; --reorder:#7fb0ef; --reorder-bg:#16233a;
+}
+
+*{box-sizing:border-box}
+html,body{margin:0}
+body{
+  background:var(--bg); color:var(--ink);
+  font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased;
+}
+h1,h2,h3{letter-spacing:-.015em; margin:0}
+a{color:var(--brand-2)}
+code,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+
+/* ── chrome ──────────────────────────────────────────────────────── */
+header.top{
+  position:sticky; top:0; z-index:40;
+  background:var(--surface); border-bottom:1px solid var(--line);
+}
+.top .bar{max-width:1280px; margin:0 auto; padding:12px 20px; display:flex; align-items:center; gap:16px; flex-wrap:wrap}
+.brandmark{font-size:16px; font-weight:680; white-space:nowrap}
+.brandmark small{display:block; font-size:11px; font-weight:500; color:var(--ink-3); letter-spacing:.06em; text-transform:uppercase}
+nav.tabs{display:flex; gap:2px; flex-wrap:wrap; margin-left:auto}
+nav.tabs button{
+  appearance:none; border:1px solid transparent; background:none; cursor:pointer;
+  color:var(--ink-2); font:inherit; font-weight:560; padding:7px 13px; border-radius:8px;
+}
+nav.tabs button:hover{background:var(--surface-3); color:var(--ink)}
+nav.tabs button.is-active{background:var(--brand); color:var(--brand-ink)}
+main{max-width:1280px; margin:0 auto; padding:22px 20px 80px}
+.view{display:none}
+.view.is-active{display:block}
+.view > h2{font-size:19px; margin-bottom:4px}
+.view > p.sub{color:var(--ink-2); margin:0 0 20px; max-width:70ch}
+
+/* ── cards & grid ────────────────────────────────────────────────── */
+.card{background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); box-shadow:var(--shadow); padding:18px}
+.card h3{font-size:14px; margin-bottom:3px}
+.card p.note{color:var(--ink-2); font-size:12.5px; margin:0 0 14px}
+.grid{display:grid; gap:14px}
+.g-auto{grid-template-columns:repeat(auto-fit,minmax(250px,1fr))}
+.g-2{grid-template-columns:repeat(auto-fit,minmax(380px,1fr))}
+.row{display:flex; gap:10px; flex-wrap:wrap; align-items:center}
+.spacer{flex:1}
+
+/* ── KPI tiles ───────────────────────────────────────────────────── */
+.tiles{display:grid; gap:12px; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); margin-bottom:20px}
+.tile{background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); padding:14px 16px; box-shadow:var(--shadow)}
+.tile .k{font-size:11px; letter-spacing:.07em; text-transform:uppercase; color:var(--ink-3); font-weight:600}
+.tile .v{font-size:23px; font-weight:670; margin-top:5px; letter-spacing:-.02em}
+.tile .m{font-size:12px; color:var(--ink-2); margin-top:3px}
+.tile.na .v{color:var(--ink-3); font-size:16px; font-weight:560}
+
+/* ── buttons & controls ──────────────────────────────────────────── */
+button.btn, .btn{
+  appearance:none; cursor:pointer; font:inherit; font-weight:580;
+  padding:8px 14px; border-radius:9px; border:1px solid var(--line);
+  background:var(--surface); color:var(--ink);
+}
+button.btn:hover{border-color:var(--brand-2); color:var(--brand-2)}
+button.btn.primary{background:var(--brand); border-color:var(--brand); color:var(--brand-ink)}
+button.btn.primary:hover{background:var(--brand-2); border-color:var(--brand-2); color:var(--brand-ink)}
+button.btn.slim{padding:5px 10px; font-size:12.5px; font-weight:560}
+button.btn:disabled{opacity:.45; cursor:not-allowed}
+input[type=text],input[type=number],select{
+  font:inherit; padding:7px 10px; border-radius:8px;
+  border:1px solid var(--line); background:var(--surface); color:var(--ink); min-width:0;
+}
+input:focus,select:focus,button:focus-visible{outline:2px solid var(--brand-2); outline-offset:1px}
+label.fld{display:flex; flex-direction:column; gap:4px; font-size:12px; color:var(--ink-2); font-weight:560}
+.seg{display:inline-flex; border:1px solid var(--line); border-radius:9px; overflow:hidden}
+.seg button{appearance:none; border:0; background:var(--surface); color:var(--ink-2); font:inherit; font-weight:560; padding:7px 12px; cursor:pointer}
+.seg button + button{border-left:1px solid var(--line)}
+.seg button.on{background:var(--brand); color:var(--brand-ink)}
+
+/* ── upload slots ────────────────────────────────────────────────── */
+.slot{
+  border:1.5px dashed var(--line); border-radius:var(--radius);
+  background:var(--surface); padding:16px; transition:border-color .15s, background .15s;
+}
+.slot.drag{border-color:var(--brand-2); background:var(--green-bg)}
+.slot.has{border-style:solid; border-color:var(--line)}
+.slot .hd{display:flex; align-items:baseline; gap:8px; margin-bottom:3px}
+.slot .hd strong{font-size:14px}
+.slot .hint{font-size:11.5px; color:var(--ink-3); margin-bottom:12px}
+.slot .state{font-size:12.5px; color:var(--ink-2); margin-bottom:12px; min-height:34px}
+.slot .state b{color:var(--ink); font-weight:600}
+.slot .src{font-size:11px; letter-spacing:.05em; text-transform:uppercase; font-weight:650}
+.src.stored{color:var(--s1)} .src.fresh{color:var(--brand-2)} .src.empty{color:var(--ink-3)}
+
+/* ── tables ──────────────────────────────────────────────────────── */
+.tblwrap{overflow:auto; border:1px solid var(--line); border-radius:var(--radius); background:var(--surface)}
+table{border-collapse:collapse; width:100%; font-size:13px}
+th,td{padding:8px 11px; text-align:right; white-space:nowrap; border-bottom:1px solid var(--line-2)}
+th:first-child,td:first-child,th.l,td.l{text-align:left}
+thead th{
+  position:sticky; top:0; z-index:2; background:var(--surface-2);
+  font-size:11px; letter-spacing:.04em; text-transform:uppercase; color:var(--ink-2); font-weight:650;
+}
+thead th.sortable{cursor:pointer; user-select:none}
+thead th.sortable:hover{color:var(--brand-2)}
+tbody tr:hover{background:var(--surface-2)}
+tfoot td{font-weight:670; background:var(--surface-2); border-top:2px solid var(--line)}
+td.num{font-variant-numeric:tabular-nums}
+td.na{color:var(--ink-3)}
+
+/* ── bands ───────────────────────────────────────────────────────── */
+.band{display:inline-flex; align-items:center; gap:5px; padding:2px 8px; border-radius:20px; font-size:11.5px; font-weight:620; white-space:nowrap}
+.band-red,.band-critical{background:var(--red-bg); color:var(--red)}
+.band-amber,.band-short,.band-watch{background:var(--amber-bg); color:var(--amber)}
+.band-green,.band-comfortable,.band-fresh{background:var(--green-bg); color:var(--green)}
+.band-tight{background:var(--surface-3); color:var(--ink-2)}
+.band-crit{background:var(--crit-bg); color:var(--crit)}
+
+/* ── banners ─────────────────────────────────────────────────────── */
+.banner{border-radius:var(--radius); padding:13px 16px; margin-bottom:14px; font-size:13px; border:1px solid}
+.banner.info{background:var(--surface-2); border-color:var(--line); color:var(--ink-2)}
+.banner.warn{background:var(--amber-bg); border-color:var(--amber); color:var(--amber)}
+.banner.err{background:var(--red-bg); border-color:var(--red); color:var(--red)}
+.banner b{color:inherit}
+.banner ul{margin:7px 0 0; padding-left:19px}
+.banner li{margin-bottom:3px}
+
+/* what each analysis is missing */
+.gate{
+  border:1px dashed var(--line); border-radius:var(--radius);
+  padding:24px; text-align:center; color:var(--ink-2); background:var(--surface-2);
+}
+.gate b{color:var(--ink); display:block; margin-bottom:5px; font-size:14px}
+.gate .why{font-size:12.5px; max-width:52ch; margin:0 auto}
+
+/* ── charts ──────────────────────────────────────────────────────── */
+.chart{margin-bottom:6px}
+.chart svg{display:block; width:100%; height:auto; overflow:visible}
+.barrow{display:grid; grid-template-columns:minmax(120px,190px) 1fr auto; gap:10px; align-items:center; margin-bottom:7px; font-size:12.5px}
+.barrow .lab{color:var(--ink-2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.barrow .track{background:var(--surface-3); border-radius:5px; height:17px; position:relative; overflow:hidden}
+.barrow .fill{position:absolute; inset:0 auto 0 0; border-radius:5px}
+.barrow .val{font-variant-numeric:tabular-nums; color:var(--ink); font-weight:600; min-width:74px; text-align:right}
+.legend{display:flex; gap:14px; flex-wrap:wrap; font-size:12px; color:var(--ink-2); margin-top:10px}
+.legend i{display:inline-block; width:11px; height:11px; border-radius:3px; margin-right:5px; vertical-align:-1px}
+
+/* ── misc ────────────────────────────────────────────────────────── */
+.muted{color:var(--ink-3)}
+.small{font-size:12px}
+.stack{display:flex; flex-direction:column; gap:14px}
+.pill{display:inline-block; background:var(--surface-3); border:1px solid var(--line); color:var(--ink-2); padding:3px 9px; border-radius:20px; font-size:11.5px; font-weight:560}
+.toast{
+  position:fixed; left:50%; bottom:26px; transform:translateX(-50%);
+  background:var(--ink); color:var(--bg); padding:10px 18px; border-radius:9px;
+  font-size:13px; font-weight:560; box-shadow:var(--shadow); z-index:90;
+  opacity:0; pointer-events:none; transition:opacity .2s;
+}
+.toast.show{opacity:1}
+.appcards{display:grid; gap:14px; grid-template-columns:repeat(auto-fit,minmax(260px,1fr))}
+.appcard{display:flex; flex-direction:column; background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); box-shadow:var(--shadow); padding:18px; text-decoration:none; color:inherit}
+.appcard:hover{border-color:var(--brand-2); transform:translateY(-2px)}
+.appcard h3{margin-bottom:5px}
+.appcard .q{color:var(--s2); font-style:italic; font-size:12.5px; margin:0 0 10px}
+.appcard p{color:var(--ink-2); font-size:13px; margin:0 0 14px; flex:1}
+.appcard .go{font-size:12.5px; font-weight:620; color:var(--brand-2); border-top:1px solid var(--line-2); padding-top:11px; margin-top:auto}
+@media (max-width:640px){
+  .top .bar{padding:10px 14px} main{padding:16px 14px 60px}
+  nav.tabs{margin-left:0; width:100%}
+}
+
+/* ── Projection vs SO ───────────────────────────────────────────── */
+
+.brandmark small a{color:inherit; text-decoration:none}
+.brandmark small a:hover{color:var(--brand-2)}
+
+.drop{
+  display:flex; flex-direction:column; align-items:center; gap:4px; cursor:pointer;
+  border:1.5px dashed var(--line); border-radius:var(--radius); background:var(--surface);
+  padding:28px 16px; text-align:center; transition:border-color .15s, background .15s;
+}
+.drop span{font-size:12.5px; color:var(--ink-3)}
+.drop:hover,.drop.drag{border-color:var(--brand-2); background:var(--green-bg)}
+
+.controls{margin-bottom:14px; align-items:flex-end}
+label.chk{display:flex; align-items:center; gap:6px; font-size:12.5px; color:var(--ink-2); font-weight:560; padding-bottom:8px}
+.seg button .ct{opacity:.7; font-weight:500; margin-left:4px}
+
+/* hierarchy table */
+tr.lvl0 td{font-weight:650; background:var(--surface-2)}
+tr.lvl1 td{font-weight:600}
+td.l .tw{display:inline-flex; align-items:center; gap:6px; max-width:560px}
+td.l .tw > span.t{overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+button.caret{
+  appearance:none; border:0; background:none; cursor:pointer; color:var(--ink-3);
+  font:inherit; width:18px; padding:0; flex:none; transition:transform .12s;
+}
+button.caret.open{transform:rotate(90deg)}
+span.caret-sp{display:inline-block; width:18px; flex:none}
+td .code{color:var(--ink-3); font-size:11.5px; font-weight:500; margin-left:6px}
+td.gap-over{color:var(--amber)}
+td.gap-under{color:var(--red)}
+.band-over{background:var(--amber-bg); color:var(--amber)}
+.band-under{background:var(--red-bg); color:var(--red)}
+.band-match{background:var(--green-bg); color:var(--green)}
+
+table.plain td,table.plain th{white-space:normal}
+.kv{display:grid; grid-template-columns:auto 1fr; gap:3px 12px; font-size:12.5px}
+.kv dt{color:var(--ink-3)} .kv dd{margin:0}
+
+@media (max-width:640px){
+  main{padding:16px 16px 60px}
+  td.l .tw{max-width:240px}
+}

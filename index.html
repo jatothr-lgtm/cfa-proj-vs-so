@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Projection vs SO</title>
+<meta name="description" content="Projection against sales orders per CFA, by customer and by item, split into over- and under-projected.">
+<link rel="stylesheet" href="styles.css?v=1">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+</head>
+<body>
+
+<header class="top">
+  <div class="bar">
+    <div class="brandmark">Projection vs SO<small>CFA · Farmley</small></div>
+    <nav class="tabs" id="tabs">
+      <button data-view="data" class="is-active">Data</button>
+      <button data-view="customer">Customer</button>
+      <button data-view="item">Item</button>
+    </nav>
+  </div>
+</header>
+
+<main>
+
+  <!-- ── Data ─────────────────────────────────────────────────── -->
+  <section class="view is-active" id="view-data">
+    <h2>Inputs</h2>
+    <p class="sub">
+      Drop the workbook with the <b>projection</b>, <b>so</b> and <b>dispatches</b> tabs
+      (and the <b>Normalisation</b> tab), or the three files separately. Tabs are recognised
+      by their columns, not their names. Everything is read in this browser; nothing is uploaded.
+    </p>
+    <label class="drop" id="drop">
+      <input type="file" id="file" accept=".xlsx,.xls,.xlsm,.csv" multiple hidden>
+      <b>Drop Excel files here</b>
+      <span>or click to choose · a later file replaces the same tab from an earlier one</span>
+    </label>
+    <div class="grid g-auto" id="slots" style="margin-top:16px"></div>
+    <div id="dataBody" style="margin-top:18px"></div>
+  </section>
+
+  <!-- ── Customer / Item ──────────────────────────────────────── -->
+  <section class="view" id="view-compare">
+    <h2 id="cmpTitle">By customer</h2>
+    <p class="sub" id="cmpSub"></p>
+    <div class="row controls">
+      <div class="seg" id="mode">
+        <button data-mode="all" class="on">All</button>
+        <button data-mode="over">Over-projected</button>
+        <button data-mode="under">Under-projected</button>
+      </div>
+      <label class="fld">CFA
+        <select id="wh"><option value="">All CFAs</option></select>
+      </label>
+      <label class="fld">Sort
+        <select id="sort">
+          <option value="gap">Gap size</option>
+          <option value="proj">Projection</option>
+          <option value="so">SO</option>
+          <option value="name">Name</option>
+        </select>
+      </label>
+      <label class="fld">Search
+        <input type="text" id="q" placeholder="customer, item or code" style="min-width:200px">
+      </label>
+      <label class="chk"><input type="checkbox" id="matchMonth" checked> Only the projection month</label>
+      <div class="spacer"></div>
+      <button class="btn slim" id="expand">Expand all</button>
+      <button class="btn slim" id="collapse">Collapse all</button>
+      <button class="btn" id="export">Export Excel</button>
+    </div>
+    <div id="cmpBanners"></div>
+    <div class="tiles" id="cmpTiles"></div>
+    <div id="cmpBody"></div>
+  </section>
+
+</main>
+
+<div class="toast" id="toast"></div>
+<script type="module" src="app.js?v=1"></script>
+</body>
+</html>

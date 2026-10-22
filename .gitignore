@@ -1,0 +1,9 @@
+# Real Farmley data — never commit.
+*.xlsx
+*.xls
+*.xlsm
+*.csv
+
+.DS_Store
+.vercel
+node_modules/
