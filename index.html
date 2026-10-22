@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Projection vs SO</title>
 <meta name="description" content="Projection against sales orders per CFA, by customer and by item, split into over- and under-projected.">
-<link rel="stylesheet" href="styles.css?v=2">
+<link rel="stylesheet" href="styles.css?v=4">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
 <body>
@@ -13,6 +13,7 @@
 <header class="top">
   <div class="bar">
     <div class="brandmark">Projection vs SO<small>CFA · Farmley</small></div>
+    <span class="days-pill" id="daysPill" hidden></span>
     <nav class="tabs" id="tabs">
       <button data-view="data" class="is-active">Data</button>
       <button data-view="customer">Customer</button>
@@ -65,19 +66,22 @@
         <input type="text" id="q" placeholder="customer, item or code" style="min-width:200px">
       </label>
       <label class="chk"><input type="checkbox" id="matchMonth" checked> Only the projection month</label>
-      <div class="spacer"></div>
-      <button class="btn slim" id="expand">Expand all</button>
-      <button class="btn slim" id="collapse">Collapse all</button>
-      <button class="btn" id="export">Export Excel</button>
     </div>
     <div id="cmpBanners"></div>
     <div class="tiles" id="cmpTiles"></div>
+    <div class="grid g-2 viz-grid-row" id="cmpCharts"></div>
+    <div class="row tbl-tools">
+      <button class="btn slim" id="expand">Expand all</button>
+      <button class="btn slim" id="collapse">Collapse all</button>
+      <div class="spacer"></div>
+      <button class="btn slim" id="export">Export Excel</button>
+    </div>
     <div id="cmpBody"></div>
   </section>
 
 </main>
 
 <div class="toast" id="toast"></div>
-<script type="module" src="app.js?v=3"></script>
+<script type="module" src="app.js?v=5"></script>
 </body>
 </html>

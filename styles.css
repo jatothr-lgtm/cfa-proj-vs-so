@@ -250,3 +250,107 @@ table.plain td,table.plain th{white-space:normal}
   main{padding:16px 16px 60px}
   td.l .tw{max-width:240px}
 }
+
+/* ── charts & motion ─────────────────────────────────────────────────
+   Chart roles validated as pairs (dataviz validator) in both modes:
+   MTD proj / SO = blue / orange, over / under = blue / red.
+   Motion follows the reference animation repos: long-tail ease-out on
+   arrivals, list stagger ~50 ms, bars grow from the baseline, nothing
+   bounces, glows or keeps moving once landed. */
+:root{
+  --viz-mtd:#2a78d6; --viz-so:#eb6834; --viz-over:#2a78d6; --viz-under:#c0392f;
+  --viz-track:#cde2fb; --viz-grid:#e8ebe8; --viz-base:#c3c8c4;
+  --ease-out:cubic-bezier(0.16,1,0.3,1); --ease-io:cubic-bezier(0.45,0,0.55,1);
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --viz-mtd:#3987e5; --viz-so:#d95926; --viz-over:#3987e5; --viz-under:#e66767;
+    --viz-track:#16233a; --viz-grid:#232c27; --viz-base:#3a453f;
+  }
+}
+:root[data-theme="dark"]{
+  --viz-mtd:#3987e5; --viz-so:#d95926; --viz-over:#3987e5; --viz-under:#e66767;
+  --viz-track:#16233a; --viz-grid:#232c27; --viz-base:#3a453f;
+}
+
+/* borders over shadows */
+.card,.tile,.tblwrap{box-shadow:none; transition:border-color .2s}
+.card:hover,.tile:hover{border-color:var(--viz-base)}
+
+/* over is blue, under is red — everywhere, not just in the charts */
+td.gap-over{color:var(--reorder)}
+.band-over{background:var(--reorder-bg); color:var(--reorder)}
+.tile .v .dot{display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:8px; vertical-align:.18em}
+
+/* period in short, in the header */
+.days-pill{
+  display:inline-flex; align-items:center; gap:7px; position:relative; overflow:hidden;
+  border:1px solid var(--line); border-radius:20px; padding:4px 11px 6px; font-size:12px; color:var(--ink-2);
+}
+.days-pill b{color:var(--ink); font-weight:650; font-variant-numeric:tabular-nums}
+.days-pill i{position:absolute; left:0; bottom:0; height:2px; width:calc(var(--f) * 100%); background:var(--viz-mtd)}
+
+/* meter: fill on a lighter step of the same ramp */
+.meter{height:6px; border-radius:6px; background:var(--viz-track); margin:9px 0 6px; overflow:hidden}
+.meter i{display:block; height:100%; width:calc(var(--f) * 100%); background:var(--viz-mtd); border-radius:6px;
+  transform-origin:left; animation:grow-x .9s var(--ease-out) both}
+.tile .m b{color:var(--ink); font-weight:650}
+.counting{font-variant-numeric:tabular-nums}
+
+/* chart cards */
+.viz-grid-row{margin-bottom:20px}
+.viz-card{padding:16px 16px 10px; min-width:0}
+.viz-head{display:flex; flex-wrap:wrap; align-items:baseline; gap:2px 14px; margin-bottom:8px}
+.viz-head h3{flex:1 1 auto}
+.viz-head .note{flex-basis:100%; order:3; margin:0}
+.viz-legend{display:flex; gap:12px; font-size:12px; color:var(--ink-2)}
+.viz-legend i{display:inline-block; width:10px; height:10px; border-radius:2px; margin-right:5px; vertical-align:-1px}
+.viz-host{width:100%}
+svg.viz{display:block; overflow:visible; font-family:inherit}
+.viz-grid line{stroke:var(--viz-grid); stroke-width:1}
+.viz-base{stroke:var(--viz-base); stroke-width:1}
+.viz-tick{fill:var(--ink-3); font-size:11px; font-variant-numeric:tabular-nums}
+.viz-label{fill:var(--ink-2); font-size:12px}
+.viz-val{fill:var(--ink); font-size:11.5px; font-weight:600; font-variant-numeric:tabular-nums}
+.viz-hit{fill:transparent; cursor:default; outline:none}
+.viz-row .viz-bar{transition:opacity .15s}
+.viz-row:hover .viz-bar,.viz-row:focus-within .viz-bar{opacity:.82}
+.viz-row:hover .viz-label,.viz-row:focus-within .viz-label{fill:var(--ink)}
+.viz-hit:focus-visible{stroke:var(--brand-2); stroke-width:1.5}
+
+/* build order: axis and grid are already there, then the data draws in */
+svg.viz.anim .viz-bar{transform-box:fill-box; animation:grow-x .6s var(--ease-out) both; animation-delay:calc(var(--i) * 50ms + 80ms)}
+svg.viz.anim .neg .viz-bar{transform-origin:right}
+svg.viz.anim .pos .viz-bar,svg.viz.anim .viz-row:not(.neg) .viz-bar{transform-origin:left}
+svg.viz.anim .viz-val{animation:fade-in .3s ease-out both; animation-delay:calc(var(--i) * 50ms + 420ms)}
+svg.viz.anim .viz-label{animation:ink-in .35s ease-out both; animation-delay:calc(var(--i) * 50ms)}
+@keyframes grow-x{from{transform:scaleX(0)} to{transform:scaleX(1)}}
+@keyframes fade-in{from{opacity:0} to{opacity:1}}
+@keyframes ink-in{from{opacity:.25; filter:blur(3px)} to{opacity:1; filter:blur(0)}}
+
+/* view titles settle in from a light blur, not a slide */
+.view.is-active > h2{animation:title-in .35s var(--ease-out) both}
+@keyframes title-in{from{opacity:0; filter:blur(6px)} to{opacity:1; filter:blur(0)}}
+
+/* tooltip: value leads, label follows */
+.viz-tip{
+  position:fixed; z-index:95; pointer-events:none; min-width:150px; max-width:320px;
+  background:var(--surface); color:var(--ink); border:1px solid var(--line); border-radius:9px;
+  padding:9px 11px; font-size:12px; box-shadow:0 6px 18px rgba(16,32,25,.10);
+  opacity:0; transform:translateY(3px); transition:opacity .12s, transform .15s var(--ease-out);
+}
+.viz-tip.on{opacity:1; transform:none}
+.viz-tip-t{color:var(--ink-2); margin-bottom:5px; font-size:11.5px; line-height:1.35}
+.viz-tip-r{display:flex; align-items:center; gap:7px; margin-top:2px}
+.viz-tip-r i{width:12px; height:2px; border-radius:2px; flex:none}
+.viz-tip-r b{font-variant-numeric:tabular-nums; font-weight:650}
+.viz-tip-r span{color:var(--ink-2)}
+
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation:none !important; transition:none !important}
+}
+@media (max-width:640px){
+  .days-pill{order:3}
+}
+
+.tbl-tools{margin-bottom:10px}

@@ -66,12 +66,32 @@ Over       = Gap > 0      Under = Gap < 0      (per customer, or per item)
   rather than quietly reading as zero. Untick *Only the projection month* to
   compare the files as loaded.
 
+## On screen
+
+- **Period, in short**, top right on every tab: *September 2026 · 29 / 30 SO
+  days*, with a thin progress line. The MTD projection tile repeats it as a
+  meter.
+- **Tiles:** Month projection · MTD projection · SO · Net gap · Over · Under.
+- **MTD projection vs SO by group** — paired bars per Customer Group (or Item
+  Group), the gap in the right column.
+- **Largest gaps** — diverging bars from zero, over-projected right (blue),
+  under-projected left (red), the top 12 customers or items.
+- Charts follow every filter (CFA, mode, search, month) and carry hover / focus
+  tooltips; the table below holds every value.
+
+Chart colours were checked with a colour-blind-safety validator in light and
+dark. Motion follows the reference animation repos (HyperFrames, Claude
+Animation Skill, ClaudeAnimationBase): long-tail ease-out
+`cubic-bezier(0.16,1,0.3,1)` on arrivals, ~50 ms stagger, bars grow from the
+baseline, figures count up in turn, nothing bounces or keeps moving, and it all
+switches off under *reduce motion*.
+
 Over / Under is decided at the lowest level — each customer, each item — so a
 group's subtotal in the Over view adds only its over-projected rows.
 
 ## Files
 
-`calc.js` holds every rule and no DOM; `app.js` is loading, views and export.
+`calc.js` holds every rule and no DOM; `charts.js` draws the SVG charts; `app.js` is loading, views and export.
 `styles.css` carries the CFA Suite's design tokens, so the two read as one system.
 
 ## Running it

@@ -4,6 +4,7 @@ import {
   TABS, TAB_LABEL, DEFAULT_WAREHOUSES, CAT_A,
   classifySheet, parseNormalisation, extractTab, prepare, leaves, tree, classify, ymLabel,
 } from "./calc.js";
+import { groupBars, gapBars } from "./charts.js";
 
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -74,7 +75,9 @@ async function loadFiles(files) {
       state.notes.push({ kind: "err", msg: `${f.name} could not be read: ${e.message}` });
     }
   }
+  state.loadId = (state.loadId || 0) + 1;
   toast("Loaded", 1200);
+  fillWarehouses();
   recompute();
   if (TABS.every((t) => state.tabs[t] && !state.tabs[t].missing.length)) setView("customer");
   else render();
@@ -98,9 +101,29 @@ function setView(v) {
 }
 
 function render() {
+  renderDays();
   renderSlots();
   renderData();
   if (state.ui.view !== "data") renderCompare();
+}
+
+/* The period in short, top right on every tab: month · SO days / days in month. */
+function renderDays() {
+  const pill = $("#daysPill"), p = state.prepared;
+  if (!p || !p.projPeriods.length) { pill.hidden = true; return; }
+  const pr = p.prorate;
+  pill.hidden = false;
+  pill.replaceChildren();
+  const m = document.createElement("span");
+  m.textContent = p.projPeriods.map(ymLabel).join(", ");
+  const d = document.createElement("b");
+  d.textContent = `${pr.soDays} / ${pr.monthDays}`;
+  const l = document.createElement("span");
+  l.textContent = "SO days";
+  const bar = document.createElement("i");
+  bar.style.setProperty("--f", Math.min(1, pr.soDays / (pr.monthDays || 1)));
+  pill.append(m, d, l, bar);
+  pill.title = `${pr.soDays} unique Sales Order Dates in the so tab, of ${pr.monthDays} days in the month`;
 }
 
 function renderSlots() {
@@ -179,8 +202,7 @@ function banners() {
   if (p) {
     const pr = p.prorate;
     out.push(pr.on
-      ? `<div class="banner info"><b>MTD projection = ${pr.soDays} of ${pr.monthDays} days</b> (${nf0.format(pr.factor * 100)}% of the month):
-          Month projection ÷ ${pr.monthDays} days in ${p.projPeriods.map(ymLabel).join(", ")} × ${pr.soDays} unique Sales Order Dates in the so tab. Gap and Over / Under compare MTD projection with SO.</div>`
+      ? `<div class="banner info"><b>MTD projection</b> = Month projection ÷ ${pr.monthDays} × ${pr.soDays} SO days (${nf0.format(pr.factor * 100)}%) · gap and over / under compare it with SO.</div>`
       : `<div class="banner warn">${esc(pr.why)}</div>`);
   }
   if (p && p.projPeriods.length) {
@@ -244,24 +266,34 @@ function renderCompare() {
   const OV = sum(by.over, "gap"), UN = sum(by.under, "gap");
   const unit = view === "customer" ? "customer" : "item";
   $("#cmpTiles").innerHTML = state.prepared ? `
-    <div class="tile"><div class="k">Month projection</div><div class="v">${kg(PF)}</div><div class="m">kg · Total KGs</div></div>
-    <div class="tile"><div class="k">MTD projection</div><div class="v">${kg(P)}</div><div class="m">${state.prepared?.prorate.on ? `${state.prepared.prorate.soDays} of ${state.prepared.prorate.monthDays} days` : "= month (no SO days)"}</div></div>
-    <div class="tile"><div class="k">SO</div><div class="v">${kg(S)}</div><div class="m">so tab ${kg(ST)} · ${CAT_A} dispatches ${kg(SD)}</div></div>
-    <div class="tile"><div class="k">Net gap</div><div class="v">${signed(P - S)}</div><div class="m">MTD proj − SO · MTD ÷ SO ${ratio(P, S)}</div></div>
-    <div class="tile"><div class="k">Over-projected</div><div class="v" style="color:var(--amber)">${signed(OV)}</div><div class="m">${by.over.length} ${unit}${by.over.length === 1 ? "" : "s"} with MTD proj &gt; SO</div></div>
-    <div class="tile"><div class="k">Under-projected</div><div class="v" style="color:var(--red)">${signed(UN)}</div><div class="m">${by.under.length} ${unit}${by.under.length === 1 ? "" : "s"} with MTD proj &lt; SO</div></div>` : "";
+    <div class="tile"><div class="k">Month projection</div><div class="v" data-n="${PF}">${kg(PF)}</div><div class="m">kg · Total KGs</div></div>
+    <div class="tile"><div class="k">MTD projection</div><div class="v" data-n="${P}">${kg(P)}</div>${daysMeter()}</div>
+    <div class="tile"><div class="k">SO</div><div class="v" data-n="${S}">${kg(S)}</div><div class="m">so tab ${kg(ST)} · ${CAT_A} dispatches ${kg(SD)}</div></div>
+    <div class="tile"><div class="k">Net gap</div><div class="v" data-n="${P - S}" data-signed="1">${signed(P - S)}</div><div class="m">MTD proj − SO · MTD ÷ SO ${ratio(P, S)}</div></div>
+    <div class="tile"><div class="k">Over-projected</div><div class="v" data-n="${OV}" data-signed="1"><i class="dot" style="background:var(--viz-over)"></i>${signed(OV)}</div><div class="m">${by.over.length} ${unit}${by.over.length === 1 ? "" : "s"} with MTD proj &gt; SO</div></div>
+    <div class="tile"><div class="k">Under-projected</div><div class="v" data-n="${UN}" data-signed="1"><i class="dot" style="background:var(--viz-under)"></i>${signed(UN)}</div><div class="m">${by.under.length} ${unit}${by.under.length === 1 ? "" : "s"} with MTD proj &lt; SO</div></div>` : "";
+
+  // Animate only when what is plotted changes — not on expand / collapse or sort.
+  const sig = [view, mode, state.ui.wh, state.ui.q, state.ui.matchMonth, state.loadId].join("|");
+  const animate = sig !== state.ui.lastSig && !REDUCED.matches;
+  state.ui.lastSig = sig;
+  if (animate) countUp($("#cmpTiles"));
 
   if (!state.prepared) {
+    $("#cmpCharts").replaceChildren();
     $("#cmpBody").innerHTML = `<div class="gate"><b>Nothing to compare yet</b><div class="why">Load the projection, so and dispatches tabs on the Data tab.</div></div>`;
     return;
   }
   const shown = mode === "all" ? all : by[mode];
   if (!shown.length) {
+    $("#cmpCharts").replaceChildren();
     $("#cmpBody").innerHTML = `<div class="gate"><b>No ${mode === "all" ? "rows" : mode + "-projected " + unit + "s"}</b><div class="why">${state.ui.q ? "Nothing matches the search." : "Every " + unit + " lands elsewhere."}</div></div>`;
     return;
   }
 
   const t = tree(shown, state.ui.sort, mode);
+  state.ui.chart = { view, mode, t, shown };
+  renderCharts(animate);
   if (!state.ui.open[view]) {
     // Start with the top level open, so groups show their customers / item
     // parents; a search opens everything so the matches are on screen.
@@ -306,6 +338,76 @@ function renderCompare() {
     <tfoot><tr><td class="l">Total · ${shown.length} ${unit}${shown.length === 1 ? "" : "s"}</td><td class="num muted">${kg(t.projFull)}</td><td class="num">${kg(t.proj)}</td><td class="num">${kg(t.so)}</td>${view === "item" ? `<td class="num muted">${kg(t.soDis)}</td>` : ""}<td class="num">${signed(t.gap)}</td><td class="num">${ratio(t.proj, t.so)}</td><td></td></tr></tfoot>
   </table></div>`;
 }
+
+/* ── charts, meter, count-up ─────────────────────────────────────── */
+
+const REDUCED = window.matchMedia("(prefers-reduced-motion: reduce)");
+
+function daysMeter() {
+  const pr = state.prepared?.prorate;
+  if (!pr || !pr.on) return `<div class="m">= month (no SO days)</div>`;
+  const f = Math.min(1, pr.soDays / pr.monthDays);
+  return `<div class="meter" role="meter" aria-valuemin="0" aria-valuemax="${pr.monthDays}" aria-valuenow="${pr.soDays}" aria-label="SO days"><i style="--f:${f}"></i></div>
+    <div class="m"><b>${pr.soDays}</b> SO days of <b>${pr.monthDays}</b> in the month</div>`;
+}
+
+/* Tile figures roll up from zero once, when their numbers change. */
+function countUp(root) {
+  // Staggered, not all at once; tabular figures only while counting so the
+  // digits do not jitter, proportional again once landed.
+  const els = [...root.querySelectorAll("[data-n]")];
+  const t0 = performance.now(), dur = 1100, gap = 70;
+  const ease = (x) => 1 - Math.pow(1 - x, 4);
+  const write = (n, v) => {
+    const txt = n.dataset.signed ? signed(v) : kg(v);
+    const last = n.lastChild;
+    if (last && last.nodeType === 3) last.nodeValue = txt; else n.append(txt);
+  };
+  els.forEach((n) => { n.classList.add("counting"); write(n, 0); });
+  const step = (now) => {
+    let live = false;
+    els.forEach((n, i) => {
+      const k = Math.max(0, Math.min(1, (now - t0 - i * gap) / dur));
+      write(n, +n.dataset.n * ease(k));
+      if (k < 1) live = true; else n.classList.remove("counting");
+    });
+    if (live) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
+
+function legend(items) {
+  return `<div class="viz-legend">${items.map(([v, l]) => `<span><i style="background:var(${v})"></i>${l}</span>`).join("")}</div>`;
+}
+
+function renderCharts(animate) {
+  const c = state.ui.chart, host = $("#cmpCharts");
+  if (!c) return;
+  const unit = c.view === "customer" ? "customer" : "item";
+  const level = c.view === "customer" ? "Customer Group" : "Item Group";
+  const groups = c.t.kids.map((k) => ({ label: k.label, proj: k.proj, so: k.so }))
+    .sort((a, b) => Math.max(b.proj, b.so) - Math.max(a.proj, a.so)).slice(0, 10);
+  const N = 12;
+  const top = [...c.shown].filter((l) => classify(l.gap) !== "match")
+    .sort((a, b) => Math.abs(b.gap) - Math.abs(a.gap)).slice(0, N)
+    .map((l) => ({ label: l.path[l.path.length - 1], full: l.path.join(" › "), proj: l.proj, so: l.so, gap: l.gap }));
+  const more = c.t.kids.length > groups.length ? ` · top ${groups.length} of ${c.t.kids.length}` : "";
+  host.innerHTML = `
+    <div class="card viz-card"><div class="viz-head"><h3>MTD projection vs SO by ${level}</h3>
+      <p class="note">kg${more} · right column is the gap (MTD proj − SO)</p>
+      ${legend([["--viz-mtd", "MTD projection"], ["--viz-so", "SO"]])}</div><div class="viz-host" id="vizGroups"></div></div>
+    <div class="card viz-card"><div class="viz-head"><h3>Largest gaps</h3>
+      <p class="note">${top.length < c.shown.length ? `Top ${top.length} of ${c.shown.length}` : `All ${top.length}`} ${unit}s, by size of MTD proj − SO, kg</p>
+      ${legend([["--viz-over", "Over-projected"], ["--viz-under", "Under-projected"]])}</div><div class="viz-host" id="vizGaps"></div></div>`;
+  groupBars($("#vizGroups"), groups, { animate, kg, signed });
+  gapBars($("#vizGaps"), top, { animate, kg, signed });
+}
+
+let resizeT;
+window.addEventListener("resize", () => {
+  clearTimeout(resizeT);
+  resizeT = setTimeout(() => { if (state.ui.view !== "data") renderCharts(false); }, 150);
+});
 
 /* ── export ──────────────────────────────────────────────────────── */
 
@@ -387,14 +489,14 @@ const input = $("#file"), drop = $("#drop");
 input.addEventListener("change", async () => {
   const files = [...input.files];
   input.value = "";
-  if (files.length) { await loadFiles(files); fillWarehouses(); render(); }
+  if (files.length) { await loadFiles(files); }
 });
 ["dragenter", "dragover"].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add("drag"); }));
 ["dragleave", "drop"].forEach((ev) => drop.addEventListener(ev, () => drop.classList.remove("drag")));
 drop.addEventListener("drop", async (e) => {
   e.preventDefault();
   const files = [...(e.dataTransfer?.files || [])];
-  if (files.length) { await loadFiles(files); fillWarehouses(); render(); }
+  if (files.length) { await loadFiles(files); }
 });
 
 fillWarehouses();
