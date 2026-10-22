@@ -14,7 +14,7 @@ const state = {
   whSource: "built-in default",
   notes: [],                // load-time messages
   prepared: null,
-  ui: { view: "data", mode: "all", wh: "", sort: "gap", q: "", matchMonth: true, prorate: true, open: { customer: null, item: null } },
+  ui: { view: "data", mode: "all", wh: "", sort: "gap", q: "", matchMonth: true, open: { customer: null, item: null } },
 };
 
 /* ── formatting ──────────────────────────────────────────────────── */
@@ -83,7 +83,7 @@ async function loadFiles(files) {
 function recompute() {
   const ok = TABS.filter((t) => state.tabs[t] && !state.tabs[t].missing.length);
   const usable = Object.fromEntries(ok.map((t) => [t, state.tabs[t]]));
-  state.prepared = ok.length ? prepare(usable, state.warehouses, { matchMonth: state.ui.matchMonth, prorate: state.ui.prorate }) : null;
+  state.prepared = ok.length ? prepare(usable, state.warehouses, { matchMonth: state.ui.matchMonth }) : null;
   state.ui.open = { customer: null, item: null };
 }
 
@@ -136,14 +136,15 @@ function renderData() {
   out.push(`<div class="card"><h3>How SO is built</h3>
     <p class="note">Projection and SO are compared in kg for the CFAs below only.</p>
     <dl class="kv">
-      <dt>Projection</dt><dd><b>projection</b> › Total KGs ÷ days in the month × SO days</dd>
+      <dt>Month proj</dt><dd><b>projection</b> › Total KGs</dd>
+      <dt>MTD proj</dt><dd>Month proj ÷ days in the month × SO days — the per-day projection over the days SO covers</dd>
       <dt>SO days</dt><dd>distinct Sales Order Dates in the <b>so</b> tab, one count for every CFA and customer, ${CAT_A} included</dd>
       <dt>SO</dt><dd><b>so</b> › Stock Qty in KGS where Customer Group ≠ ${CAT_A}</dd>
       <dt>+</dt><dd><b>dispatches</b> › Stock Qty In Kg where Sales Channel = ${CAT_A}, Invoice Status ≠ Return</dd>
       <dt>${CAT_A}</dt><dd>compared as one customer: every ${CAT_A} customer on either side is added into one row</dd>
       <dt>Item Group</dt><dd>projection › Item Group · so › NEW MIS ITEM GROUP · dispatches › New Mis Item Group</dd>
       <dt>Items</dt><dd>matched on Item Code; labels taken from the projection first, then so, then dispatches</dd>
-      <dt>Over / Under</dt><dd>decided per customer or per item: Projection &gt; SO is over, Projection &lt; SO is under</dd>
+      <dt>Over / Under</dt><dd>decided per customer or per item on MTD proj: MTD proj &gt; SO is over, MTD proj &lt; SO is under</dd>
     </dl></div>`);
 
   out.push(`<div class="card"><h3>CFAs compared</h3><p class="note">From the ${esc(state.whSource)}. Any other warehouse is left out.</p>
@@ -178,9 +179,9 @@ function banners() {
   if (p) {
     const pr = p.prorate;
     out.push(pr.on
-      ? `<div class="banner info"><b>Projection pro-rated to ${pr.soDays} of ${pr.monthDays} days</b> (${nf0.format(pr.factor * 100)}%):
-          Total KGs ÷ ${pr.monthDays} days in ${p.projPeriods.map(ymLabel).join(", ")} × ${pr.soDays} distinct Sales Order Dates in the so tab.</div>`
-      : `<div class="banner ${state.ui.prorate ? "warn" : "info"}">${esc(pr.why)}</div>`);
+      ? `<div class="banner info"><b>MTD projection = ${pr.soDays} of ${pr.monthDays} days</b> (${nf0.format(pr.factor * 100)}% of the month):
+          Month projection ÷ ${pr.monthDays} days in ${p.projPeriods.map(ymLabel).join(", ")} × ${pr.soDays} unique Sales Order Dates in the so tab. Gap and Over / Under compare MTD projection with SO.</div>`
+      : `<div class="banner warn">${esc(pr.why)}</div>`);
   }
   if (p && p.projPeriods.length) {
     for (const t of ["so", "dispatches"]) {
@@ -223,7 +224,7 @@ function renderCompare() {
   const { view, mode } = state.ui;
   $("#cmpTitle").textContent = view === "customer" ? "By customer" : "By item";
   $("#cmpSub").innerHTML = view === "customer"
-    ? `Customer Group › Customer. Projection (Total KGs, pro-rated to SO days) against SO (so tab, plus ${CAT_A} from dispatches).`
+    ? `Customer Group › Customer. MTD projection (per-day projection × SO days) against SO (so tab, plus ${CAT_A} from dispatches).`
     : `Item Group › Item Parent › Item Name, across all customers. Same SO as the customer view.`;
   $("#cmpBanners").innerHTML = banners();
 
@@ -243,11 +244,12 @@ function renderCompare() {
   const OV = sum(by.over, "gap"), UN = sum(by.under, "gap");
   const unit = view === "customer" ? "customer" : "item";
   $("#cmpTiles").innerHTML = state.prepared ? `
-    <div class="tile"><div class="k">Projection${state.prepared?.prorate.on ? ` · ${state.prepared.prorate.soDays}/${state.prepared.prorate.monthDays} days` : ""}</div><div class="v">${kg(P)}</div><div class="m">${state.prepared?.prorate.on ? `full month ${kg(PF)} kg` : "kg, full month"}</div></div>
+    <div class="tile"><div class="k">Month projection</div><div class="v">${kg(PF)}</div><div class="m">kg · Total KGs</div></div>
+    <div class="tile"><div class="k">MTD projection</div><div class="v">${kg(P)}</div><div class="m">${state.prepared?.prorate.on ? `${state.prepared.prorate.soDays} of ${state.prepared.prorate.monthDays} days` : "= month (no SO days)"}</div></div>
     <div class="tile"><div class="k">SO</div><div class="v">${kg(S)}</div><div class="m">so tab ${kg(ST)} · ${CAT_A} dispatches ${kg(SD)}</div></div>
-    <div class="tile"><div class="k">Net gap</div><div class="v">${signed(P - S)}</div><div class="m">Projection − SO · Proj ÷ SO ${ratio(P, S)}</div></div>
-    <div class="tile"><div class="k">Over-projected</div><div class="v" style="color:var(--amber)">${signed(OV)}</div><div class="m">${by.over.length} ${unit}${by.over.length === 1 ? "" : "s"} with Projection &gt; SO</div></div>
-    <div class="tile"><div class="k">Under-projected</div><div class="v" style="color:var(--red)">${signed(UN)}</div><div class="m">${by.under.length} ${unit}${by.under.length === 1 ? "" : "s"} with Projection &lt; SO</div></div>` : "";
+    <div class="tile"><div class="k">Net gap</div><div class="v">${signed(P - S)}</div><div class="m">MTD proj − SO · MTD ÷ SO ${ratio(P, S)}</div></div>
+    <div class="tile"><div class="k">Over-projected</div><div class="v" style="color:var(--amber)">${signed(OV)}</div><div class="m">${by.over.length} ${unit}${by.over.length === 1 ? "" : "s"} with MTD proj &gt; SO</div></div>
+    <div class="tile"><div class="k">Under-projected</div><div class="v" style="color:var(--red)">${signed(UN)}</div><div class="m">${by.under.length} ${unit}${by.under.length === 1 ? "" : "s"} with MTD proj &lt; SO</div></div>` : "";
 
   if (!state.prepared) {
     $("#cmpBody").innerHTML = `<div class="gate"><b>Nothing to compare yet</b><div class="why">Load the projection, so and dispatches tabs on the Data tab.</div></div>`;
@@ -283,6 +285,7 @@ function renderCompare() {
           ${isLeaf ? `<span class="caret-sp"></span>` : `<button class="caret${isOpen ? " open" : ""}" data-id="${esc(id)}" aria-label="${isOpen ? "Collapse" : "Expand"}">▸</button>`}
           <span class="t">${esc(k.label)}${isLeaf && k.leaf.code ? `<span class="code">${esc(k.leaf.code)}</span>` : ""}</span>
           ${!isLeaf ? `<span class="muted small">${k.n}</span>` : ""}</span></td>
+        <td class="num muted">${kg(k.projFull)}</td>
         <td class="num">${kg(k.proj)}</td>
         <td class="num">${kg(k.so)}</td>
         ${view === "item" ? `<td class="num muted">${kg(k.soDis)}</td>` : ""}
@@ -298,9 +301,9 @@ function renderCompare() {
     ? `<th class="l">Customer Group › Customer</th>`
     : `<th class="l">Item Group › Item Parent › Item Name</th>`;
   $("#cmpBody").innerHTML = `<div class="tblwrap"><table>
-    <thead><tr>${head}<th>Projection kg</th><th>SO kg</th>${view === "item" ? `<th title="Part of SO that came from ${CAT_A} dispatches">of which ${CAT_A}</th>` : ""}<th>Gap kg</th><th>Proj ÷ SO</th><th>Status</th></tr></thead>
+    <thead><tr>${head}<th title="Total KGs for the whole month">Month proj kg</th><th title="Month proj ÷ days in month × unique Sales Order Dates">MTD proj kg</th><th>SO kg</th>${view === "item" ? `<th title="Part of SO that came from ${CAT_A} dispatches">of which ${CAT_A}</th>` : ""}<th title="MTD proj − SO">Gap kg</th><th>MTD ÷ SO</th><th>Status</th></tr></thead>
     <tbody>${rows.join("")}</tbody>
-    <tfoot><tr><td class="l">Total · ${shown.length} ${unit}${shown.length === 1 ? "" : "s"}</td><td class="num">${kg(t.proj)}</td><td class="num">${kg(t.so)}</td>${view === "item" ? `<td class="num muted">${kg(t.soDis)}</td>` : ""}<td class="num">${signed(t.gap)}</td><td class="num">${ratio(t.proj, t.so)}</td><td></td></tr></tfoot>
+    <tfoot><tr><td class="l">Total · ${shown.length} ${unit}${shown.length === 1 ? "" : "s"}</td><td class="num muted">${kg(t.projFull)}</td><td class="num">${kg(t.proj)}</td><td class="num">${kg(t.so)}</td>${view === "item" ? `<td class="num muted">${kg(t.soDis)}</td>` : ""}<td class="num">${signed(t.gap)}</td><td class="num">${ratio(t.proj, t.so)}</td><td></td></tr></tfoot>
   </table></div>`;
 }
 
@@ -317,11 +320,11 @@ function exportXlsx() {
       : ["Item Group", "Item Parent", "Item Name", "Item Code"];
     for (const mode of ["all", "over", "under"]) {
       const pick = mode === "all" ? ls : ls.filter((l) => classify(l.gap) === mode);
-      const aoa = [[...head, "Projection kg", "Projection full month kg", "SO kg", "SO from so tab kg", `SO from ${CAT_A} dispatches kg`, "Gap kg (Proj − SO)", "Proj ÷ SO", "Status"]];
+      const aoa = [[...head, "Month projection kg", "MTD projection kg", "SO kg", "SO from so tab kg", `SO from ${CAT_A} dispatches kg`, "Gap kg (MTD proj − SO)", "MTD proj ÷ SO", "Status"]];
       for (const l of [...pick].sort(order[mode])) {
         aoa.push([
           ...(view === "customer" ? l.path : [...l.path, l.code]),
-          round(l.proj), round(l.projFull), round(l.so), round(l.soTab), round(l.soDis), round(l.gap),
+          round(l.projFull), round(l.proj), round(l.so), round(l.soTab), round(l.soDis), round(l.gap),
           l.so > 0 ? round(l.proj / l.so, 4) : null,
           { over: "Over-projected", under: "Under-projected", match: "Match" }[classify(l.gap)],
         ]);
@@ -337,7 +340,7 @@ function exportXlsx() {
     ["Projection vs SO"],
     ["CFA", state.ui.wh || "All CFAs"],
     ["Month filter", p.filterMonth ? p.projPeriods.map(ymLabel).join(", ") : "off"],
-    ["Projection", p.prorate.on ? `pro-rated: Total KGs ÷ ${p.prorate.monthDays} days × ${p.prorate.soDays} SO days (${round(p.prorate.factor, 4)})` : `full month — ${p.prorate.why}`],
+    ["MTD projection", p.prorate.on ? `Month projection ÷ ${p.prorate.monthDays} days × ${p.prorate.soDays} unique Sales Order Dates (${round(p.prorate.factor, 4)})` : p.prorate.why],
     [],
     ["Tab", "Left out because", "Rows", "Kg"],
     ...p.exclusions.map((e) => [TAB_LABEL[e.tab], e.reason, e.rows, round(e.kg)]),
@@ -365,7 +368,6 @@ $("#wh").addEventListener("change", (e) => { state.ui.wh = e.target.value; state
 $("#sort").addEventListener("change", (e) => { state.ui.sort = e.target.value; renderCompare(); });
 $("#q").addEventListener("input", (e) => { state.ui.q = e.target.value; state.ui.open = { customer: null, item: null }; renderCompare(); });
 $("#matchMonth").addEventListener("change", (e) => { state.ui.matchMonth = e.target.checked; recompute(); render(); });
-$("#prorate").addEventListener("change", (e) => { state.ui.prorate = e.target.checked; recompute(); render(); });
 $("#export").addEventListener("click", exportXlsx);
 $("#expand").addEventListener("click", () => {
   const v = state.ui.view;

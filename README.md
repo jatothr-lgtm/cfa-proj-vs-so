@@ -26,12 +26,13 @@ each tab.
 ## The rules
 
 ```
-SO days    = distinct Sales Order Dates in the so tab
-Projection = projection › Total KGs ÷ days in the projection month × SO days
+Month proj = projection › Total KGs
+SO days    = unique Sales Order Dates in the so tab
+MTD proj   = Month proj ÷ days in the projection month × SO days   (per-day projection × SO days)
 SO         = so › Stock Qty in KGS            where Customer Group ≠ Category A
            + dispatches › Stock Qty In Kg     where Sales Channel  = Category A
                                                 and Invoice Status ≠ Return
-Gap        = Projection − SO
+Gap        = MTD proj − SO
 Over       = Gap > 0      Under = Gap < 0      (per customer, or per item)
 ```
 
@@ -47,15 +48,17 @@ Over       = Gap > 0      Under = Gap < 0      (per customer, or per item)
   Flavoured Makhana - Achaari*); matching on labels would split one SKU into a
   false over row and a false under row. Labels come from the projection first,
   then so, then dispatches.
-- **The projection is pro-rated to the SO days.** A per-day projection
-  (Total KGs ÷ calendar days in the month) is multiplied by the number of
-  distinct Sales Order Dates in the so tab, so a part-month SO dump is compared
-  with the matching share of the month. The days are counted over the **whole**
+- **SO is compared with the MTD projection.** Both columns are shown: Month
+  proj (Total KGs) and MTD proj — the per-day projection (Total KGs ÷ calendar
+  days in the month) times the number of unique Sales Order Dates in the so
+  tab. Gap, MTD ÷ SO and Over / Under all use MTD proj, so a part-month SO dump
+  is compared with the matching share of the month. The days are counted over the **whole**
   so tab — every origin, before the Category A and warehouse rules — so every
   CFA and customer, Category A included, is scaled by the same factor. With the
   month filter on, only dates in the projection month count. The banner and the
-  Projection tile show the factor (e.g. 29 / 30 days); untick *Pro-rate
-  projection to SO days* to compare the full month. The export carries both.
+  MTD projection tile show the day count (e.g. 29 of 30 days). With no usable
+  SO dates, MTD proj falls back to the month and a warning says so. The export
+  carries both columns.
 - **The projection's grand-total row is dropped** — summed in, it would double
   every figure.
 - **Month.** By default so and dispatches rows outside the projection's month

@@ -1,6 +1,7 @@
 /* Projection vs SO — parsing and the comparison itself. No DOM in here.
  *
- *   Projection = projection tab, Total KGs ÷ days in the month × SO days
+ *   Month proj = projection tab, Total KGs
+ *   MTD proj   = Month proj ÷ days in the month × SO days (distinct Sales Order Dates)
  *   SO         = so tab, Stock Qty in KGS, Customer Group ≠ Category A
  *              + dispatches tab, Stock Qty In Kg, Sales Channel = Category A,
  *                Invoice Status ≠ Return
@@ -238,6 +239,9 @@ export function extractTab(tab, rows, headerRow) {
  *   matchMonth: keep so / dispatches rows only in the projection's month(s)
  *   prorate:    scale the projection to the days the SO dump covers
  *
+ * Each projection row carries both figures: `fullQty` is the month's Total KGs,
+ * `qty` the MTD projection. Gap and Over / Under are always MTD projection − SO.
+ *
  * Pro-rating: Projection = Total KGs ÷ days in the projection month × SO days,
  * where SO days = distinct Sales Order Dates in the so tab — counted over the
  * whole tab, before the Category A and warehouse rules, so every CFA and
@@ -261,10 +265,10 @@ export function prepare(tabs, warehouses, { matchMonth = true, prorate = true } 
   }
   const monthDays = [...projPeriods].reduce((s, p) => s + daysInMonth(p), 0);
   const pr = { on: false, factor: 1, soDays: soDayset.size, monthDays, why: "" };
-  if (!prorate) pr.why = "Pro-rating is off — the full-month projection is compared.";
-  else if (!tabs.so) pr.why = "No so tab, so there are no SO days to pro-rate to — the full-month projection is compared.";
-  else if (!projPeriods.size) pr.why = "The projection has no readable Month / Year — the full-month projection is compared.";
-  else if (!soDayset.size) pr.why = "The so tab has no Sales Order Dates in the projection month — the full-month projection is compared.";
+  if (!prorate) pr.why = "Pro-rating is off — MTD projection equals the month projection.";
+  else if (!tabs.so) pr.why = "No so tab, so there are no SO days — MTD projection falls back to the full month.";
+  else if (!projPeriods.size) pr.why = "The projection has no readable Month / Year — MTD projection falls back to the full month.";
+  else if (!soDayset.size) pr.why = "The so tab has no Sales Order Dates in the projection month — MTD projection falls back to the full month.";
   else Object.assign(pr, { on: true, factor: soDayset.size / monthDays });
 
   const ex = [];   // exclusion buckets: { tab, reason, rows, kg, kind }
@@ -386,16 +390,16 @@ export const classify = (gap) => (gap > EPS ? "over" : gap < -EPS ? "under" : "m
 
 /* Nest leaves into a tree by their path. Every node carries its totals. */
 export function tree(leafRows, sortBy = "gap", mode = "all") {
-  const root = { label: "Total", children: new Map(), proj: 0, so: 0, soDis: 0, n: 0, depth: -1 };
+  const root = { label: "Total", children: new Map(), proj: 0, projFull: 0, so: 0, soDis: 0, n: 0, depth: -1 };
   for (const l of leafRows) {
     let node = root;
-    node.proj += l.proj; node.so += l.so; node.soDis += l.soDis; node.n++;
+    node.proj += l.proj; node.projFull += l.projFull; node.so += l.so; node.soDis += l.soDis; node.n++;
     l.path.forEach((label, d) => {
       const last = d === l.path.length - 1;
       const k = last ? label + "\u0000" + (l.code || "") : label;
       let c = node.children.get(k);
-      if (!c) node.children.set(k, (c = { label, children: new Map(), proj: 0, so: 0, soDis: 0, n: 0, depth: d, leaf: last ? l : null }));
-      c.proj += l.proj; c.so += l.so; c.soDis += l.soDis; c.n++;
+      if (!c) node.children.set(k, (c = { label, children: new Map(), proj: 0, projFull: 0, so: 0, soDis: 0, n: 0, depth: d, leaf: last ? l : null }));
+      c.proj += l.proj; c.projFull += l.projFull; c.so += l.so; c.soDis += l.soDis; c.n++;
       node = c;
     });
   }
