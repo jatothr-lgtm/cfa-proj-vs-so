@@ -72,8 +72,19 @@ then open <http://localhost:8790>. `app.js` is an ES module, so opening
 
 ## Deploying
 
-Vercel: framework preset **Other**, no build command, output directory the repo
-root.
+Vercel, from the GitHub repo:
+
+1. Vercel → **Add New → Project** → import this repository.
+2. Framework preset **Other**. Leave Build Command and Install Command empty;
+   Output Directory is the repo root (`.`).
+3. Deploy. No environment variables are needed — there is no backend.
+
+`vercel.json` turns on clean URLs and sends `no-cache` for the HTML, CSS and JS
+so a redeploy is picked up on the next page load.
+
+**Commit author matters on Vercel Hobby.** A push-triggered deploy is blocked
+unless the commit author is the account owner, so commit as
+`jatoth.r@farmley.com`.
 
 ## Data hygiene
 
