@@ -5,6 +5,7 @@ import {
   classifySheet, parseNormalisation, extractTab, prepare, leaves, tree, classify, ymLabel,
 } from "./calc.js";
 import { groupBars, gapBars } from "./charts.js";
+import { exportWorkbook } from "./export.js";
 
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -438,61 +439,21 @@ window.addEventListener("resize", () => {
 
 /* ── export ──────────────────────────────────────────────────────── */
 
-function exportXlsx() {
+async function exportXlsx() {
   if (!state.prepared) { toast("Nothing loaded yet"); return; }
-  const wb = XLSX.utils.book_new();
-  const order = { over: (a, b) => b.gap - a.gap, under: (a, b) => a.gap - b.gap, all: (a, b) => Math.abs(b.gap) - Math.abs(a.gap) };
-  for (const view of ["customer", "item"]) {
-    const ls = leaves(state.prepared, view, state.ui.wh);
-    const head = view === "customer"
-      ? ["Customer Group", "Customer"]
-      : ["Item Group", "Item Parent", "Item Name", "Item Code"];
-    for (const mode of ["all", "over", "under"]) {
-      const pick = mode === "all" ? ls : ls.filter((l) => classify(l.gap) === mode);
-      const aoa = [[...head, "Month projection kg", "MTD projection kg", "SO kg", "SO from so tab kg", `SO from ${CAT_A} dispatches kg`, "Gap kg (MTD proj − SO)", "MTD proj ÷ SO", "Status"]];
-      for (const l of [...pick].sort(order[mode])) {
-        aoa.push([
-          ...(view === "customer" ? l.path : [...l.path, l.code]),
-          round(l.projFull), round(l.proj), round(l.so), round(l.soTab), round(l.soDis), round(l.gap),
-          l.so > 0 ? round(l.proj / l.so, 4) : null,
-          { over: "Over-projected", under: "Under-projected", match: "Match" }[classify(l.gap)],
-        ]);
-      }
-      const ws = XLSX.utils.aoa_to_sheet(aoa);
-      ws["!cols"] = aoa[0].map((h, i) => ({ wch: i < head.length ? (i === head.length - 1 && view === "item" ? 18 : 34) : 16 }));
-      const name = `${view === "customer" ? "Customer" : "Item"} - ${{ all: "All", over: "Over", under: "Under" }[mode]}`;
-      XLSX.utils.book_append_sheet(wb, ws, name);
-    }
+  const btn = $("#export");
+  btn.disabled = true;
+  toast("Building the Excel…", 60000);
+  try {
+    await exportWorkbook({ prepared: state.prepared, wh: state.ui.wh, sort: state.ui.sort });
+    toast("Excel downloaded", 1600);
+  } catch (e) {
+    console.error(e);
+    toast(e.message || "Export failed");
+  } finally {
+    btn.disabled = false;
   }
-  // Every customer broken down by item, one row each.
-  const cx = [["Customer Group", "Customer", "Item Group", "Item Parent", "Item Name", "Item Code", "Month projection kg", "MTD projection kg", "SO kg", "SO from so tab kg", `SO from ${CAT_A} dispatches kg`, "Gap kg (MTD proj − SO)", "MTD proj ÷ SO", "Status"]];
-  const cust = leaves(state.prepared, "customer", state.ui.wh).sort((a, b) => a.path.join("|").localeCompare(b.path.join("|")));
-  for (const l of cust) {
-    for (const it of [...l.items].sort((a, b) => a.path.join("|").localeCompare(b.path.join("|")))) {
-      cx.push([...l.path, ...it.path, it.code, round(it.projFull), round(it.proj), round(it.so), round(it.soTab), round(it.soDis), round(it.gap),
-        it.so > 0 ? round(it.proj / it.so, 4) : null, { over: "Over-projected", under: "Under-projected", match: "Match" }[classify(it.gap)]]);
-    }
-  }
-  const wsx = XLSX.utils.aoa_to_sheet(cx);
-  wsx["!cols"] = cx[0].map((h, i) => ({ wch: i < 5 ? 30 : i === 5 ? 18 : 16 }));
-  XLSX.utils.book_append_sheet(wb, wsx, "Customer x Item");
-
-  const p = state.prepared;
-  const info = [
-    ["Projection vs SO"],
-    ["CFA", state.ui.wh || "All CFAs"],
-    ["Month filter", p.filterMonth ? p.projPeriods.map(ymLabel).join(", ") : "off"],
-    ["MTD projection", p.prorate.on ? `Month projection ÷ ${p.prorate.monthDays} days × ${p.prorate.soDays} unique Sales Order Dates (${round(p.prorate.factor, 4)})` : p.prorate.why],
-    [],
-    ["Tab", "Left out because", "Rows", "Kg"],
-    ...p.exclusions.map((e) => [TAB_LABEL[e.tab], e.reason, e.rows, round(e.kg)]),
-  ];
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(info), "Notes");
-  const tag = [p.projPeriods[0] || "", state.ui.wh || "all"].filter(Boolean).join("-");
-  XLSX.writeFile(wb, `proj-vs-so-${tag}.xlsx`);
 }
-
-const round = (v, d = 3) => Math.round(v * 10 ** d) / 10 ** d;
 
 /* ── wiring ──────────────────────────────────────────────────────── */
 

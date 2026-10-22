@@ -97,6 +97,24 @@ search that matches items (not the customer) narrows each customer to those
 items and its totals to theirs, so the rows on screen always add up. The export
 adds a **Customer x Item** sheet with every customer-item pair.
 
+## The Excel export
+
+Styled like the dashboard (ExcelJS, loaded on the first export):
+
+| Sheet | What it holds |
+|---|---|
+| Summary | Period, **SO days / days in month**, the six tiles, how it is built, rows left out |
+| Customer - All / Over / Under | Customer Group › Customer › Item Group › Item Parent › Item Name |
+| Item - All / Over / Under | Item Group › Item Parent › Item Name |
+| Customer x Item | One flat row per customer-item pair, with filters |
+
+The breakdowns are Excel **outline levels** — the 1–5 buttons at the top left
+collapse or open a level, the same as the dashboard's arrows. Over is blue and
+under red (gap figures and the ▲ Over / ▼ Under tags), top-level groups are
+shaded, Month projection is grey, header row and first column are frozen, and
+the Over / Under sheet tabs are blue / red. Numbers use `#,##0`, which follows
+the reader's digit grouping (1,33,861 on an Indian locale).
+
 ## Files
 
 `calc.js` holds every rule and no DOM; `charts.js` draws the SVG charts; `app.js` is loading, views and export.
