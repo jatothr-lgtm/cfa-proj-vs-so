@@ -354,3 +354,6 @@ svg.viz.anim .viz-label{animation:ink-in .35s ease-out both; animation-delay:cal
 }
 
 .tbl-tools{margin-bottom:10px}
+tr.sub td{font-weight:400}
+tr.sub td.l{color:var(--ink-2)}
+tr.sub.leaf td.l{color:var(--ink)}

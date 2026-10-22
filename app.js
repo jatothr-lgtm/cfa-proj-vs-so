@@ -225,19 +225,44 @@ function banners() {
   return out.join("");
 }
 
+const matches = (l, q) => l.path.some((x) => x.toLowerCase().includes(q)) || (l.code || "").toLowerCase().includes(q);
+
 function currentLeaves(view) {
   if (!state.prepared) return [];
   let ls = leaves(state.prepared, view, state.ui.wh);
   const q = state.ui.q.trim().toLowerCase();
-  if (q) ls = ls.filter((l) => l.path.some((x) => x.toLowerCase().includes(q)) || (l.code || "").toLowerCase().includes(q));
-  return ls;
+  if (!q) return ls;
+  if (view === "item") return ls.filter((l) => matches(l, q));
+  // Customer view: a matching customer keeps everything; otherwise it keeps
+  // only its matching items and its totals become theirs, so the rows on
+  // screen always add up to the customer above them.
+  const out = [];
+  for (const l of ls) {
+    if (matches(l, q)) { out.push(l); continue; }
+    const items = l.items.filter((it) => matches(it, q));
+    if (!items.length) continue;
+    const r = { ...l, items };
+    for (const f of ["proj", "projFull", "so", "soTab", "soDis"]) r[f] = items.reduce((a, it) => a + it[f], 0);
+    r.gap = r.proj - r.so;
+    out.push(r);
+  }
+  return out;
 }
+
+/* A customer row opens into its items: Item Group › Item Parent › Item Name. */
+const subTree = (k) => (k.sub ||= tree(k.leaf.items, state.ui.sort, "all"));
+const opens = (k) => !k.leaf || (k.leaf.items?.length > 0);
 
 const nodeId = (path) => path.join("\u0001");
 
 function branchIds(t) {
   const ids = new Set();
-  const walk = (n, path) => n.kids.forEach((k) => { if (!k.leaf) { const p = [...path, k.label]; ids.add(nodeId(p)); walk(k, p); } });
+  const walk = (n, path) => n.kids.forEach((k) => {
+    if (!opens(k)) return;
+    const p = [...path, k.label];
+    ids.add(nodeId(p));
+    walk(k.leaf ? subTree(k) : k, p);
+  });
   walk(t, []);
   return ids;
 }
@@ -246,7 +271,7 @@ function renderCompare() {
   const { view, mode } = state.ui;
   $("#cmpTitle").textContent = view === "customer" ? "By customer" : "By item";
   $("#cmpSub").innerHTML = view === "customer"
-    ? `Customer Group › Customer. MTD projection (per-day projection × SO days) against SO (so tab, plus ${CAT_A} from dispatches).`
+    ? `Customer Group › Customer, then open a customer for Item Group › Item Parent › Item Name. MTD projection (per-day projection × SO days) against SO (so tab, plus ${CAT_A} from dispatches).`
     : `Item Group › Item Parent › Item Name, across all customers. Same SO as the customer view.`;
   $("#cmpBanners").innerHTML = banners();
 
@@ -301,22 +326,24 @@ function renderCompare() {
   }
   const open = state.ui.open[view];
   const rows = [];
-  const walk = (node, path) => {
+  const walk = (node, path, offset = 0) => {
     for (const k of node.kids) {
       const pth = [...path, k.label];
       const id = nodeId(pth);
       const isLeaf = !!k.leaf;
+      const canOpen = opens(k);
+      const depth = k.depth + offset;
       const cls = classify(k.gap);
-      const isOpen = open.has(id);
+      const isOpen = canOpen && open.has(id);
       let title = "";
       if (isLeaf && view === "customer" && k.label.startsWith(CAT_A)) {
         title = `Projection: ${[...k.leaf.custs.proj].join(", ") || "none"} · SO: ${k.leaf.custs.so.size} dispatch customer(s)`;
       }
-      rows.push(`<tr class="lvl${k.depth}${isLeaf ? " leaf" : ""}">
-        <td class="l"><span class="tw" style="padding-left:${k.depth * 20}px"${title ? ` title="${esc(title)}"` : ""}>
-          ${isLeaf ? `<span class="caret-sp"></span>` : `<button class="caret${isOpen ? " open" : ""}" data-id="${esc(id)}" aria-label="${isOpen ? "Collapse" : "Expand"}">▸</button>`}
+      rows.push(`<tr class="lvl${depth}${isLeaf ? " leaf" : ""}${offset ? " sub" : ""}">
+        <td class="l"><span class="tw" style="padding-left:${depth * 20}px"${title ? ` title="${esc(title)}"` : ""}>
+          ${canOpen ? `<button class="caret${isOpen ? " open" : ""}" data-id="${esc(id)}" aria-label="${isOpen ? "Collapse" : "Expand"}">▸</button>` : `<span class="caret-sp"></span>`}
           <span class="t">${esc(k.label)}${isLeaf && k.leaf.code ? `<span class="code">${esc(k.leaf.code)}</span>` : ""}</span>
-          ${!isLeaf ? `<span class="muted small">${k.n}</span>` : ""}</span></td>
+          ${!isLeaf ? `<span class="muted small">${k.n}</span>` : canOpen ? `<span class="muted small">${k.leaf.items.length} item${k.leaf.items.length === 1 ? "" : "s"}</span>` : ""}</span></td>
         <td class="num muted">${kg(k.projFull)}</td>
         <td class="num">${kg(k.proj)}</td>
         <td class="num">${kg(k.so)}</td>
@@ -325,12 +352,12 @@ function renderCompare() {
         <td class="num">${ratio(k.proj, k.so)}</td>
         <td>${isLeaf ? `<span class="band band-${cls}">${BAND[cls]}</span>` : ""}</td>
       </tr>`);
-      if (!isLeaf && isOpen) walk(k, pth);
+      if (isOpen) isLeaf ? walk(subTree(k), pth, depth + 1) : walk(k, pth, offset);
     }
   };
   walk(t, []);
   const head = view === "customer"
-    ? `<th class="l">Customer Group › Customer</th>`
+    ? `<th class="l">Customer Group › Customer › Item Group › Item Parent › Item Name</th>`
     : `<th class="l">Item Group › Item Parent › Item Name</th>`;
   $("#cmpBody").innerHTML = `<div class="tblwrap"><table>
     <thead><tr>${head}<th title="Total KGs for the whole month">Month proj kg</th><th title="Month proj ÷ days in month × unique Sales Order Dates">MTD proj kg</th><th>SO kg</th>${view === "item" ? `<th title="Part of SO that came from ${CAT_A} dispatches">of which ${CAT_A}</th>` : ""}<th title="MTD proj − SO">Gap kg</th><th>MTD ÷ SO</th><th>Status</th></tr></thead>
@@ -437,6 +464,19 @@ function exportXlsx() {
       XLSX.utils.book_append_sheet(wb, ws, name);
     }
   }
+  // Every customer broken down by item, one row each.
+  const cx = [["Customer Group", "Customer", "Item Group", "Item Parent", "Item Name", "Item Code", "Month projection kg", "MTD projection kg", "SO kg", "SO from so tab kg", `SO from ${CAT_A} dispatches kg`, "Gap kg (MTD proj − SO)", "MTD proj ÷ SO", "Status"]];
+  const cust = leaves(state.prepared, "customer", state.ui.wh).sort((a, b) => a.path.join("|").localeCompare(b.path.join("|")));
+  for (const l of cust) {
+    for (const it of [...l.items].sort((a, b) => a.path.join("|").localeCompare(b.path.join("|")))) {
+      cx.push([...l.path, ...it.path, it.code, round(it.projFull), round(it.proj), round(it.so), round(it.soTab), round(it.soDis), round(it.gap),
+        it.so > 0 ? round(it.proj / it.so, 4) : null, { over: "Over-projected", under: "Under-projected", match: "Match" }[classify(it.gap)]]);
+    }
+  }
+  const wsx = XLSX.utils.aoa_to_sheet(cx);
+  wsx["!cols"] = cx[0].map((h, i) => ({ wch: i < 5 ? 30 : i === 5 ? 18 : 16 }));
+  XLSX.utils.book_append_sheet(wb, wsx, "Customer x Item");
+
   const p = state.prepared;
   const info = [
     ["Projection vs SO"],

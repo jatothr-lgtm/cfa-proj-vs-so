@@ -351,13 +351,20 @@ function itemLabels(rows) {
 const itemKey = (r) => (r.code ? "c:" + key(r.code) : "n:" + key(r.name));
 
 /* Leaf rows for one view: customer leaves or item leaves, each with
- * proj / so (and so split by source) for the chosen warehouse. */
+ * proj / so (and so split by source) for the chosen warehouse.
+ * A customer leaf also carries `items`: its breakdown by Item Group ›
+ * Item Parent › Item Name, labelled exactly as in the item view. */
 export function leaves(prepared, view, wh = "") {
   const rows = wh ? prepared.rows.filter((r) => r.wh === wh) : prepared.rows;
   const out = new Map();
   const display = new Map();   // key → first label seen, projection first
   const ordered = [...rows].sort((a, b) => (a.src === "proj" ? 0 : 1) - (b.src === "proj" ? 0 : 1));
-  const labels = view === "item" ? itemLabels(prepared.rows) : null;
+  const labels = itemLabels(prepared.rows);
+  const blank = (path, code) => ({ path, code, proj: 0, projFull: 0, so: 0, soTab: 0, soDis: 0 });
+  const add = (o, r) => {
+    if (r.src === "proj") { o.proj += r.qty; o.projFull += r.fullQty; }
+    else { o.so += r.qty; if (r.src === "so") o.soTab += r.qty; else o.soDis += r.qty; }
+  };
 
   for (const r of ordered) {
     let k, path;
@@ -373,15 +380,27 @@ export function leaves(prepared, view, wh = "") {
       path = [l.group, l.parent, l.name];
     }
     let leaf = out.get(k);
-    if (!leaf) out.set(k, (leaf = { path, code: view === "item" ? labels.get(k).code : "", proj: 0, projFull: 0, so: 0, soTab: 0, soDis: 0, custs: { proj: new Set(), so: new Set() } }));
-    if (r.src === "proj") { leaf.proj += r.qty; leaf.projFull += r.fullQty; leaf.custs.proj.add(r.rawCust); }
-    else {
-      leaf.so += r.qty;
-      if (r.src === "so") leaf.soTab += r.qty; else leaf.soDis += r.qty;
-      leaf.custs.so.add(r.rawCust);
+    if (!leaf) {
+      leaf = { ...blank(path, view === "item" ? labels.get(k).code : ""), custs: { proj: new Set(), so: new Set() } };
+      if (view === "customer") leaf.items = new Map();
+      out.set(k, leaf);
+    }
+    add(leaf, r);
+    leaf.custs[r.src === "proj" ? "proj" : "so"].add(r.rawCust);
+    if (view === "customer") {
+      const ik = itemKey(r), l = labels.get(ik);
+      let it = leaf.items.get(ik);
+      if (!it) leaf.items.set(ik, (it = blank([l.group, l.parent, l.name], l.code)));
+      add(it, r);
     }
   }
-  for (const l of out.values()) l.gap = l.proj - l.so;
+  for (const l of out.values()) {
+    l.gap = l.proj - l.so;
+    if (l.items) {
+      l.items = [...l.items.values()];
+      for (const it of l.items) it.gap = it.proj - it.so;
+    }
+  }
   return [...out.values()];
 }
 

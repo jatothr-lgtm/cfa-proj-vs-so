@@ -89,6 +89,14 @@ switches off under *reduce motion*.
 Over / Under is decided at the lowest level — each customer, each item — so a
 group's subtotal in the Over view adds only its over-projected rows.
 
+**Customer tab drill-down.** Each customer opens into Item Group (NEW MIS ITEM
+GROUP) › Item Parent › Item Name, with the same columns and its own Over / Under
+status on every item. The customer row is still what the Over / Under tabs,
+tiles and charts classify, so opening a customer never changes their counts. A
+search that matches items (not the customer) narrows each customer to those
+items and its totals to theirs, so the rows on screen always add up. The export
+adds a **Customer x Item** sheet with every customer-item pair.
+
 ## Files
 
 `calc.js` holds every rule and no DOM; `charts.js` draws the SVG charts; `app.js` is loading, views and export.
