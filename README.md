@@ -26,7 +26,8 @@ each tab.
 ## The rules
 
 ```
-Projection = projection › Total KGs
+SO days    = distinct Sales Order Dates in the so tab
+Projection = projection › Total KGs ÷ days in the projection month × SO days
 SO         = so › Stock Qty in KGS            where Customer Group ≠ Category A
            + dispatches › Stock Qty In Kg     where Sales Channel  = Category A
                                                 and Invoice Status ≠ Return
@@ -46,6 +47,15 @@ Over       = Gap > 0      Under = Gap < 0      (per customer, or per item)
   Flavoured Makhana - Achaari*); matching on labels would split one SKU into a
   false over row and a false under row. Labels come from the projection first,
   then so, then dispatches.
+- **The projection is pro-rated to the SO days.** A per-day projection
+  (Total KGs ÷ calendar days in the month) is multiplied by the number of
+  distinct Sales Order Dates in the so tab, so a part-month SO dump is compared
+  with the matching share of the month. The days are counted over the **whole**
+  so tab — every origin, before the Category A and warehouse rules — so every
+  CFA and customer, Category A included, is scaled by the same factor. With the
+  month filter on, only dates in the projection month count. The banner and the
+  Projection tile show the factor (e.g. 29 / 30 days); untick *Pro-rate
+  projection to SO days* to compare the full month. The export carries both.
 - **The projection's grand-total row is dropped** — summed in, it would double
   every figure.
 - **Month.** By default so and dispatches rows outside the projection's month

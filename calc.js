@@ -1,6 +1,6 @@
 /* Projection vs SO — parsing and the comparison itself. No DOM in here.
  *
- *   Projection = projection tab, Total KGs
+ *   Projection = projection tab, Total KGs ÷ days in the month × SO days
  *   SO         = so tab, Stock Qty in KGS, Customer Group ≠ Category A
  *              + dispatches tab, Stock Qty In Kg, Sales Channel = Category A,
  *                Invoice Status ≠ Return
@@ -96,21 +96,30 @@ const num = (v) => {
 
 const pad = (n) => String(n).padStart(2, "0");
 
-/* "YYYY-MM" from a Date, an ISO / D-M-Y string or an Excel serial. */
-export function ym(v) {
+/* "YYYY-MM-DD" from a Date, an ISO / D-M-Y string or an Excel serial. */
+export function ymd(v) {
   if (v == null || v === "") return null;
-  if (v instanceof Date && !isNaN(v)) return `${v.getFullYear()}-${pad(v.getMonth() + 1)}`;
+  if (v instanceof Date && !isNaN(v)) return `${v.getFullYear()}-${pad(v.getMonth() + 1)}-${pad(v.getDate())}`;
   if (typeof v === "number" && v > 20000 && v < 80000) {
     const d = new Date(Math.round((v - 25569) * 86400000));
-    return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}`;
+    return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
   }
   const s = String(v).trim();
-  let m = s.match(/^(\d{4})[-/.](\d{1,2})/);
-  if (m) return `${m[1]}-${pad(m[2])}`;
+  let m = s.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
+  if (m) return `${m[1]}-${pad(m[2])}-${pad(m[3])}`;
   m = s.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})/);
-  if (m) return `${m[3]}-${pad(m[2])}`;
+  if (m) return `${m[3]}-${pad(m[2])}-${pad(m[1])}`;
   return null;
 }
+
+/* "YYYY-MM" — the month of ymd(). */
+export const ym = (v) => ymd(v)?.slice(0, 7) ?? null;
+
+/* Calendar days in a "YYYY-MM" month. */
+export const daysInMonth = (p) => {
+  const [y, m] = p.split("-").map(Number);
+  return new Date(y, m, 0).getDate();
+};
 
 export function ymLabel(p) {
   if (!p) return "—";
@@ -201,6 +210,7 @@ export function extractTab(tab, rows, headerRow) {
       qty: num(get(r, "qty")),
       status: clean(get(r, "status")),
       period: null,
+      day: null,
       total: false,
     };
     if (tab === "projection") {
@@ -211,7 +221,8 @@ export function extractTab(tab, rows, headerRow) {
       // The extract ends on a grand-total row; summing it would double everything.
       rec.total = [get(r, "month"), rec.wh, rec.cust].some((v) => /^(grand )?total$/i.test(clean(v)));
     } else {
-      rec.period = ym(get(r, "date"));
+      rec.day = ymd(get(r, "date"));
+      rec.period = rec.day?.slice(0, 7) ?? null;
     }
     if (!rec.total && rec.period) periods.set(rec.period, (periods.get(rec.period) || 0) + 1);
     records.push(rec);
@@ -225,8 +236,15 @@ export function extractTab(tab, rows, headerRow) {
  *   tabs:       { projection, so, dispatches } as returned by extractTab
  *   warehouses: [{ code, projection, so, dispatches }]
  *   matchMonth: keep so / dispatches rows only in the projection's month(s)
+ *   prorate:    scale the projection to the days the SO dump covers
+ *
+ * Pro-rating: Projection = Total KGs ÷ days in the projection month × SO days,
+ * where SO days = distinct Sales Order Dates in the so tab — counted over the
+ * whole tab, before the Category A and warehouse rules, so every CFA and
+ * customer (Category A included) is scaled by the same factor. With the month
+ * filter on, only dates inside the projection month count.
  */
-export function prepare(tabs, warehouses, { matchMonth = true } = {}) {
+export function prepare(tabs, warehouses, { matchMonth = true, prorate = true } = {}) {
   const whMap = {};
   for (const t of TABS) {
     whMap[t] = new Map();
@@ -236,6 +254,18 @@ export function prepare(tabs, warehouses, { matchMonth = true } = {}) {
   const projPeriods = new Set();
   for (const r of tabs.projection?.records || []) if (!r.total && r.period) projPeriods.add(r.period);
   const filterMonth = matchMonth && projPeriods.size > 0;
+
+  const soDayset = new Set();
+  for (const r of tabs.so?.records || []) {
+    if (r.day && (!filterMonth || projPeriods.has(r.period))) soDayset.add(r.day);
+  }
+  const monthDays = [...projPeriods].reduce((s, p) => s + daysInMonth(p), 0);
+  const pr = { on: false, factor: 1, soDays: soDayset.size, monthDays, why: "" };
+  if (!prorate) pr.why = "Pro-rating is off — the full-month projection is compared.";
+  else if (!tabs.so) pr.why = "No so tab, so there are no SO days to pro-rate to — the full-month projection is compared.";
+  else if (!projPeriods.size) pr.why = "The projection has no readable Month / Year — the full-month projection is compared.";
+  else if (!soDayset.size) pr.why = "The so tab has no Sales Order Dates in the projection month — the full-month projection is compared.";
+  else Object.assign(pr, { on: true, factor: soDayset.size / monthDays });
 
   const ex = [];   // exclusion buckets: { tab, reason, rows, kg, kind }
   const bump = (tab, reason, kind, kg) => {
@@ -279,12 +309,13 @@ export function prepare(tabs, warehouses, { matchMonth = true } = {}) {
         group: r.group,
         parent: r.parent,
         name: r.name,
-        qty: r.qty,
+        qty: tab === "projection" ? r.qty * pr.factor : r.qty,
+        fullQty: r.qty,
       });
     }
   }
 
-  return { rows, exclusions: ex, outside, projPeriods: [...projPeriods].sort(), filterMonth };
+  return { rows, exclusions: ex, outside, projPeriods: [...projPeriods].sort(), filterMonth, prorate: pr };
 }
 
 /* Labels for each item, keyed on Item Code: first non-blank of
@@ -338,8 +369,8 @@ export function leaves(prepared, view, wh = "") {
       path = [l.group, l.parent, l.name];
     }
     let leaf = out.get(k);
-    if (!leaf) out.set(k, (leaf = { path, code: view === "item" ? labels.get(k).code : "", proj: 0, so: 0, soTab: 0, soDis: 0, custs: { proj: new Set(), so: new Set() } }));
-    if (r.src === "proj") { leaf.proj += r.qty; leaf.custs.proj.add(r.rawCust); }
+    if (!leaf) out.set(k, (leaf = { path, code: view === "item" ? labels.get(k).code : "", proj: 0, projFull: 0, so: 0, soTab: 0, soDis: 0, custs: { proj: new Set(), so: new Set() } }));
+    if (r.src === "proj") { leaf.proj += r.qty; leaf.projFull += r.fullQty; leaf.custs.proj.add(r.rawCust); }
     else {
       leaf.so += r.qty;
       if (r.src === "so") leaf.soTab += r.qty; else leaf.soDis += r.qty;

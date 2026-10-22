@@ -14,7 +14,7 @@ const state = {
   whSource: "built-in default",
   notes: [],                // load-time messages
   prepared: null,
-  ui: { view: "data", mode: "all", wh: "", sort: "gap", q: "", matchMonth: true, open: { customer: null, item: null } },
+  ui: { view: "data", mode: "all", wh: "", sort: "gap", q: "", matchMonth: true, prorate: true, open: { customer: null, item: null } },
 };
 
 /* ── formatting ──────────────────────────────────────────────────── */
@@ -83,7 +83,7 @@ async function loadFiles(files) {
 function recompute() {
   const ok = TABS.filter((t) => state.tabs[t] && !state.tabs[t].missing.length);
   const usable = Object.fromEntries(ok.map((t) => [t, state.tabs[t]]));
-  state.prepared = ok.length ? prepare(usable, state.warehouses, { matchMonth: state.ui.matchMonth }) : null;
+  state.prepared = ok.length ? prepare(usable, state.warehouses, { matchMonth: state.ui.matchMonth, prorate: state.ui.prorate }) : null;
   state.ui.open = { customer: null, item: null };
 }
 
@@ -136,7 +136,8 @@ function renderData() {
   out.push(`<div class="card"><h3>How SO is built</h3>
     <p class="note">Projection and SO are compared in kg for the CFAs below only.</p>
     <dl class="kv">
-      <dt>Projection</dt><dd><b>projection</b> › Total KGs</dd>
+      <dt>Projection</dt><dd><b>projection</b> › Total KGs ÷ days in the month × SO days</dd>
+      <dt>SO days</dt><dd>distinct Sales Order Dates in the <b>so</b> tab, one count for every CFA and customer, ${CAT_A} included</dd>
       <dt>SO</dt><dd><b>so</b> › Stock Qty in KGS where Customer Group ≠ ${CAT_A}</dd>
       <dt>+</dt><dd><b>dispatches</b> › Stock Qty In Kg where Sales Channel = ${CAT_A}, Invoice Status ≠ Return</dd>
       <dt>${CAT_A}</dt><dd>compared as one customer: every ${CAT_A} customer on either side is added into one row</dd>
@@ -174,6 +175,13 @@ function banners() {
       Its kg count as zero below, so ${missing.includes("projection") ? "everything reads under-projected" : missing.includes("dispatches") ? `${CAT_A} reads fully over-projected` : "every customer outside " + CAT_A + " reads over-projected"} — load it on the Data tab.</div>`);
   }
   const p = state.prepared;
+  if (p) {
+    const pr = p.prorate;
+    out.push(pr.on
+      ? `<div class="banner info"><b>Projection pro-rated to ${pr.soDays} of ${pr.monthDays} days</b> (${nf0.format(pr.factor * 100)}%):
+          Total KGs ÷ ${pr.monthDays} days in ${p.projPeriods.map(ymLabel).join(", ")} × ${pr.soDays} distinct Sales Order Dates in the so tab.</div>`
+      : `<div class="banner ${state.ui.prorate ? "warn" : "info"}">${esc(pr.why)}</div>`);
+  }
   if (p && p.projPeriods.length) {
     for (const t of ["so", "dispatches"]) {
       const s = state.tabs[t];
@@ -215,7 +223,7 @@ function renderCompare() {
   const { view, mode } = state.ui;
   $("#cmpTitle").textContent = view === "customer" ? "By customer" : "By item";
   $("#cmpSub").innerHTML = view === "customer"
-    ? `Customer Group › Customer. Projection (Total KGs) against SO (so tab, plus ${CAT_A} from dispatches).`
+    ? `Customer Group › Customer. Projection (Total KGs, pro-rated to SO days) against SO (so tab, plus ${CAT_A} from dispatches).`
     : `Item Group › Item Parent › Item Name, across all customers. Same SO as the customer view.`;
   $("#cmpBanners").innerHTML = banners();
 
@@ -231,11 +239,11 @@ function renderCompare() {
 
   // Tiles always describe the whole view, whatever the mode.
   const sum = (a, f) => a.reduce((s, l) => s + l[f], 0);
-  const P = sum(all, "proj"), S = sum(all, "so"), ST = sum(all, "soTab"), SD = sum(all, "soDis");
+  const P = sum(all, "proj"), PF = sum(all, "projFull"), S = sum(all, "so"), ST = sum(all, "soTab"), SD = sum(all, "soDis");
   const OV = sum(by.over, "gap"), UN = sum(by.under, "gap");
   const unit = view === "customer" ? "customer" : "item";
   $("#cmpTiles").innerHTML = state.prepared ? `
-    <div class="tile"><div class="k">Projection</div><div class="v">${kg(P)}</div><div class="m">kg</div></div>
+    <div class="tile"><div class="k">Projection${state.prepared?.prorate.on ? ` · ${state.prepared.prorate.soDays}/${state.prepared.prorate.monthDays} days` : ""}</div><div class="v">${kg(P)}</div><div class="m">${state.prepared?.prorate.on ? `full month ${kg(PF)} kg` : "kg, full month"}</div></div>
     <div class="tile"><div class="k">SO</div><div class="v">${kg(S)}</div><div class="m">so tab ${kg(ST)} · ${CAT_A} dispatches ${kg(SD)}</div></div>
     <div class="tile"><div class="k">Net gap</div><div class="v">${signed(P - S)}</div><div class="m">Projection − SO · Proj ÷ SO ${ratio(P, S)}</div></div>
     <div class="tile"><div class="k">Over-projected</div><div class="v" style="color:var(--amber)">${signed(OV)}</div><div class="m">${by.over.length} ${unit}${by.over.length === 1 ? "" : "s"} with Projection &gt; SO</div></div>
@@ -309,11 +317,11 @@ function exportXlsx() {
       : ["Item Group", "Item Parent", "Item Name", "Item Code"];
     for (const mode of ["all", "over", "under"]) {
       const pick = mode === "all" ? ls : ls.filter((l) => classify(l.gap) === mode);
-      const aoa = [[...head, "Projection kg", "SO kg", "SO from so tab kg", `SO from ${CAT_A} dispatches kg`, "Gap kg (Proj − SO)", "Proj ÷ SO", "Status"]];
+      const aoa = [[...head, "Projection kg", "Projection full month kg", "SO kg", "SO from so tab kg", `SO from ${CAT_A} dispatches kg`, "Gap kg (Proj − SO)", "Proj ÷ SO", "Status"]];
       for (const l of [...pick].sort(order[mode])) {
         aoa.push([
           ...(view === "customer" ? l.path : [...l.path, l.code]),
-          round(l.proj), round(l.so), round(l.soTab), round(l.soDis), round(l.gap),
+          round(l.proj), round(l.projFull), round(l.so), round(l.soTab), round(l.soDis), round(l.gap),
           l.so > 0 ? round(l.proj / l.so, 4) : null,
           { over: "Over-projected", under: "Under-projected", match: "Match" }[classify(l.gap)],
         ]);
@@ -329,6 +337,7 @@ function exportXlsx() {
     ["Projection vs SO"],
     ["CFA", state.ui.wh || "All CFAs"],
     ["Month filter", p.filterMonth ? p.projPeriods.map(ymLabel).join(", ") : "off"],
+    ["Projection", p.prorate.on ? `pro-rated: Total KGs ÷ ${p.prorate.monthDays} days × ${p.prorate.soDays} SO days (${round(p.prorate.factor, 4)})` : `full month — ${p.prorate.why}`],
     [],
     ["Tab", "Left out because", "Rows", "Kg"],
     ...p.exclusions.map((e) => [TAB_LABEL[e.tab], e.reason, e.rows, round(e.kg)]),
@@ -356,6 +365,7 @@ $("#wh").addEventListener("change", (e) => { state.ui.wh = e.target.value; state
 $("#sort").addEventListener("change", (e) => { state.ui.sort = e.target.value; renderCompare(); });
 $("#q").addEventListener("input", (e) => { state.ui.q = e.target.value; state.ui.open = { customer: null, item: null }; renderCompare(); });
 $("#matchMonth").addEventListener("change", (e) => { state.ui.matchMonth = e.target.checked; recompute(); render(); });
+$("#prorate").addEventListener("change", (e) => { state.ui.prorate = e.target.checked; recompute(); render(); });
 $("#export").addEventListener("click", exportXlsx);
 $("#expand").addEventListener("click", () => {
   const v = state.ui.view;
