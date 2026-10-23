@@ -1,307 +1,311 @@
-/* Projection vs SO — the Excel export, styled like the dashboard.
+/* Projection vs SO — the Excel export.
  *
- * ExcelJS (loaded on first export) rather than SheetJS, because the
- * community SheetJS build cannot write fills, fonts or outline levels.
+ * Same format as projection-analytics-dashboard:
  *
- * Three tabs:
- *   Summary   period, SO days, the tiles, the rules, rows left out
- *   Customer  Customer Group › Customer › Item Group › Item Parent › Item Name
- *   Item      Item Group › Item Parent › Item Name
- * The breakdowns are Excel outline levels (the 1–5 buttons). Over / Under is
- * the colour-coded Status column, filterable, rather than tabs of its own.
+ *   All Conditions Applied  row-level data — the only sheet with literal
+ *                           numbers; filters, SO days and rows left out sit
+ *                           to the right of it (columns after a gap)
+ *   Customer Pivot          Customer Group › Customer › Item Group ›
+ *                           Item Parent › Item Name
+ *   Item Pivot              Item Group › Item Parent › Item Name ›
+ *                           Customer Group › Customer
+ *   Over-Projected          Item Group › Item Parent › Item Name, MTD proj > SO
+ *   Under-Projected         Item Group › Item Parent › Item Name, SO > MTD proj
  *
- * Colours match the dashboard: over is blue, under is red, group rows shaded.
+ * Written with xlsx-js-style (SheetJS 0.18.5 plus cell styles), as LIVE
+ * FORMULAS: pivot leaves are SUMIFS on the data sheet, parents SUM their
+ * direct children, every ratio is arithmetic on the row. Each formula carries
+ * its cached result — without one the writer drops the cell and Excel shows a
+ * blank grid until it recalculates. Pivot rows use Excel's outline: children
+ * start collapsed under a + button.
+ *
+ * Colours: indigo header, one tint per outline depth, bold total row,
+ * red → amber → green on Mismatch %, as in the reference; over / under keep
+ * the dashboard's blue / red so the two read the same.
  */
 
-import { CAT_A, TAB_LABEL, leaves, tree, classify, ymLabel } from "./calc.js";
+import { CAT_A, TAB_LABEL, leaves, tree, classify, ymLabel, rowLabeler } from "./calc.js";
 
-const EXCELJS = "https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js";
+const DATA_SHEET = "All Conditions Applied";
+const PCT_Z = "0.0%", KG_Z = "#,##0.00", INT_Z = "#,##0";
 
-let loading;
-export function loadExcelJS() {
-  if (window.ExcelJS) return Promise.resolve(window.ExcelJS);
-  return (loading ||= new Promise((ok, fail) => {
-    const s = document.createElement("script");
-    s.src = EXCELJS;
-    s.onload = () => (window.ExcelJS ? ok(window.ExcelJS) : fail(new Error("ExcelJS did not initialise")));
-    s.onerror = () => { loading = null; fail(new Error("Could not load the Excel writer — check the connection")); };
-    document.head.appendChild(s);
+/* ── cells ───────────────────────────────────────────────────────── */
+
+const F = (f, z, v, s) => ({ f, z, v, s });          // formula + cached result
+const N = (v, z, s) => ({ v, z, s });                // literal number
+const T = (v, s) => ({ txt: v == null ? "" : String(v), s });
+
+function buildSheet(grid) {
+  const ws = {};
+  let maxC = 0;
+  grid.forEach((row, R) => row.forEach((val, C) => {
+    if (C > maxC) maxC = C;
+    const addr = XLSX.utils.encode_cell({ r: R, c: C });
+    if (val == null || val === "") { ws[addr] = { t: "s", v: "" }; return; }
+    if (typeof val === "object" && val.f !== undefined) {
+      // The cell type follows the cached result; Excel recalculates on open.
+      if (typeof val.v === "number" && Number.isFinite(val.v)) {
+        ws[addr] = { t: "n", v: val.v, f: val.f };
+        if (val.z) ws[addr].z = val.z;
+      } else ws[addr] = { t: "s", v: val.v == null ? "" : String(val.v), f: val.f };
+    } else if (typeof val === "object" && val.txt !== undefined) {
+      ws[addr] = { t: "s", v: val.txt };
+    } else if (typeof val === "object" && val.v !== undefined) {
+      ws[addr] = { t: "n", v: val.v };
+      if (val.z) ws[addr].z = val.z;
+    } else if (typeof val === "number") ws[addr] = { t: "n", v: val };
+    else ws[addr] = { t: "s", v: String(val) };
+    if (val && typeof val === "object" && val.s) ws[addr].s = val.s;
   }));
+  ws["!ref"] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: Math.max(0, grid.length - 1), c: maxC } });
+  return ws;
 }
 
-/* ── palette (the dashboard's light tokens, as ARGB) ─────────────── */
+function addSheet(wb, name, grid, widths, rowMeta) {
+  const ws = buildSheet(grid);
+  const nCols = (grid[0] || []).length;
+  ws["!cols"] = widths;
+  if (grid.length > 1) {
+    ws["!autofilter"] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: grid.length - 1, c: Math.max(0, nCols - 1) } }) };
+  }
+  if (rowMeta) {
+    ws["!rows"] = rowMeta;
+    ws["!outline"] = { above: true };   // the summary row sits above its detail
+  }
+  XLSX.utils.book_append_sheet(wb, ws, name.slice(0, 31));
+  return ws;
+}
 
-const C = {
-  brand: "FF17603F", white: "FFFFFFFF",
-  ink: "FF16241D", ink2: "FF5B6B63", ink3: "FF8B9992",
-  line: "FFE2E7E3", shade0: "FFF1F4F2", shade1: "FFFAFBFA",
-  over: "FF1D4F91", overBg: "FFE8EFF9",
-  under: "FFC0392F", underBg: "FFFDECEA",
-  match: "FF1F7D53", matchBg: "FFE8F5EE",
-  warnBg: "FFFDF3E2", warn: "FFA87F00",
+/* ── styles ──────────────────────────────────────────────────────── */
+
+const BRD = {
+  top: { style: "thin", color: { rgb: "FFDDE1EC" } }, bottom: { style: "thin", color: { rgb: "FFDDE1EC" } },
+  left: { style: "thin", color: { rgb: "FFDDE1EC" } }, right: { style: "thin", color: { rgb: "FFDDE1EC" } },
 };
-const FONT = "Calibri";
-const fill = (argb) => ({ type: "pattern", pattern: "solid", fgColor: { argb } });
-const hair = { style: "thin", color: { argb: C.line } };
-const KG = "#,##0";                 // follows the reader's digit grouping (1,33,861 on en-IN)
-const GAP = "+#,##0;-#,##0;0";
-const PCT = "0%";
+const S_HEAD = {
+  fill: { fgColor: { rgb: "FF4F46E5" } }, font: { color: { rgb: "FFFFFFFF" }, bold: true, sz: 10 },
+  alignment: { horizontal: "center", vertical: "center", wrapText: true }, border: BRD,
+};
+const S_TOTAL = { fill: { fgColor: { rgb: "FFDDE1EC" } }, font: { bold: true, color: { rgb: "FF16192B" } }, border: BRD };
+const DEPTH_FILL = ["FFEEF0F6", "FFFFFFFF", "FFF7F8FC", "FFFFFFFF"];
+
+const sDepth = (depth, bold) => ({
+  fill: { fgColor: { rgb: DEPTH_FILL[Math.min(depth, 3)] } },
+  font: { bold: !!bold, color: { rgb: depth ? "FF4A5060" : "FF16192B" } },
+  border: BRD,
+});
+const sTint = (base, rgb, bold) => ({ ...base, font: { color: { rgb }, bold: bold === undefined ? base.font?.bold : bold } });
+function sMismatch(base, pct) {
+  const p = Number.isFinite(pct) ? pct : 0;
+  if (p >= 0.5) return { ...base, fill: { fgColor: { rgb: "FFFBDDDD" } }, font: { color: { rgb: "FFB91C1C" }, bold: true } };
+  if (p >= 0.25) return { ...base, fill: { fgColor: { rgb: "FFFDEEDA" } }, font: { color: { rgb: "FFB45309" }, bold: false } };
+  return { ...base, fill: { fgColor: { rgb: "FFE7F7EC" } }, font: { color: { rgb: "FF15803D" }, bold: false } };
+}
+// Direction, as on the dashboard: over-projected blue, under-projected red.
+const OVER = "FF1D4F91", UNDER = "FFC0392F", FLAT = "FF6B7186";
+const GAP_RGB = (d) => (d > 0.0005 ? OVER : d < -0.0005 ? UNDER : FLAT);
+const RATIO_RGB = (r) => (r == null || !Number.isFinite(r) ? FLAT : r > 1.05 ? OVER : r < 0.95 ? UNDER : "FF15803D");
 const STATUS = {
-  over:  { text: "▲ Over",  font: C.over,  bg: C.overBg },
-  under: { text: "▼ Under", font: C.under, bg: C.underBg },
-  match: { text: "● Match", font: C.match, bg: C.matchBg },
+  over: { text: "▲ Over", fill: "FFE8EFF9", font: OVER },
+  under: { text: "▼ Under", fill: "FFFDECEA", font: UNDER },
+  match: { text: "● Match", fill: "FFE8F5EE", font: "FF1F7D53" },
 };
+const sStatus = (base, cls) => ({ ...base, fill: { fgColor: { rgb: STATUS[cls].fill } }, font: { color: { rgb: STATUS[cls].font }, bold: true }, alignment: { horizontal: "center" } });
 
-function header(ws, cols) {
-  ws.columns = cols.map((c) => ({ header: c.h, key: c.k, width: c.w }));
-  const r = ws.getRow(1);
-  r.height = 22;
-  r.eachCell((cell, i) => {
-    cell.font = { bold: true, color: { argb: C.white }, size: 10 };
-    cell.fill = fill(C.brand);
-    cell.alignment = { vertical: "middle", horizontal: i === 1 ? "left" : cols[i - 1].num ? "right" : "left", wrapText: true };
-  });
-  ws.views = [{ state: "frozen", ySplit: 1, xSplit: 1 }];
+/* ── the row-level sheet ─────────────────────────────────────────── */
+
+const DATA_FIELDS = [
+  "cfa", "customer_group", "customer", "item_group", "item_parent", "item_name", "item_code",
+  "row_type", "source_customer", "month_proj_kgs", "mtd_proj_kgs", "so_kgs", "cat_a_dispatch_kgs",
+];
+const DC = Object.fromEntries(DATA_FIELDS.map((f, i) => [f, null]));   // letters filled in below
+const ROW_TYPE = { proj: "Projection", so: "SO", dis: `${CAT_A} dispatch` };
+
+/* ── pivots ──────────────────────────────────────────────────────── */
+
+/* Our trees (calc.tree) → one node shape: label, code, the four sums, children. */
+function node(n, children, code) {
+  return { label: n.label, code: code || n.leaf?.code || "", month: n.projFull, mtd: n.proj, so: n.so, dis: n.soDis, children };
 }
 
-/* One data row: numbers formatted, gap coloured, status as a coloured tag. */
-function dataRow(ws, values, { depth = 0, leaf = false, strong = false, gap = 0, showStatus = leaf, cols }) {
-  const row = ws.addRow(values);
-  const cls = classify(gap);
-  row.outlineLevel = depth;
-  // ExcelJS flags the deepest level "collapsed" (level >= outlineLevelRow);
-  // nothing here is collapsed, so every row opens and the +/− buttons agree.
-  Object.defineProperty(row, "collapsed", { get: () => false, configurable: true });
-  cols.forEach((c, i) => {
-    const cell = row.getCell(i + 1);
-    cell.border = { bottom: hair };
-    if (c.fmt) cell.numFmt = c.fmt;
-    if (c.k === "name") cell.alignment = { horizontal: "left", indent: depth * 2, vertical: "middle" };
-    if (c.k === "month") cell.font = { color: { argb: C.ink3 } };
-    if (c.k === "dis" || c.k === "code") cell.font = { color: { argb: C.ink3 } };
-    if (c.k === "gap") cell.font = { color: { argb: cls === "over" ? C.over : cls === "under" ? C.under : C.ink2 }, bold: !leaf };
-    if (c.k === "status") {
-      if (showStatus) {
-        const s = STATUS[cls];
-        cell.value = s.text;
-        cell.font = { color: { argb: s.font }, bold: true };
-        cell.fill = fill(s.bg);
-        cell.alignment = { horizontal: "center" };
-      } else cell.value = null;
-    }
-  });
-  // Rows read like the dashboard: top-level groups shaded and bold, lower
-  // groups in secondary ink, customers bold, items plain.
-  if (!leaf && depth === 0) {
-    row.eachCell({ includeEmpty: true }, (cell) => {
-      cell.fill = fill(C.shade0);
-      cell.font = { ...(cell.font || {}), bold: true };
-    });
-  } else if (!leaf) {
-    row.getCell(1).font = { color: { argb: C.ink2 } };
-  } else if (strong) {
-    row.getCell(1).font = { bold: true, color: { argb: C.ink } };
+/* A label is used as a SUMIFS criterion by cell reference; one that Excel
+ * would read as a wildcard or comparison is passed as an escaped literal. */
+const unsafe = (s) => /[*?~]|^[<>=]/.test(s);
+const esc = (s) => '"=' + s.replace(/[~*?]/g, "~$&").replace(/"/g, '""') + '"';
+
+function pivotSheet(roots, levels, lastRow) {
+  const col = (i) => XLSX.utils.encode_col(i);
+  const q = (c) => `'${DATA_SHEET}'!$${c}$2:$${c}$${lastRow}`;
+  const N_L = levels.length;
+  const cCode = col(N_L), cLevel = col(N_L + 1), cMo = col(N_L + 2), cMtd = col(N_L + 3), cSo = col(N_L + 4),
+    cDis = col(N_L + 5), cGap = col(N_L + 6);
+
+  const grid = [[...levels.map((l) => l.label), "Item Code", "Level", "Month Proj kgs", "MTD Proj kgs", "SO kgs",
+    `${CAT_A} Disp kgs`, "Gap kgs", "SO / Proj %", "Proj / SO %", "Proj vs SO %", "Mismatch %", "Status"].map((h) => T(h, S_HEAD))];
+  const meta = [{}];
+
+  const derived = (R, a, base) => {
+    const gap = a.mtd - a.so;
+    const den = Math.max(a.so, a.mtd);
+    const cls = classify(gap);
+    return [
+      F(`${cMtd}${R}-${cSo}${R}`, KG_Z, gap, sTint(base, GAP_RGB(gap))),
+      F(`IF(${cMtd}${R}=0,"",${cSo}${R}/${cMtd}${R})`, PCT_Z, a.mtd > 0 ? a.so / a.mtd : null, sTint(base, RATIO_RGB(a.so > 0 ? a.mtd / a.so : null))),
+      F(`IF(${cSo}${R}=0,"",${cMtd}${R}/${cSo}${R})`, PCT_Z, a.so > 0 ? a.mtd / a.so : null, sTint(base, RATIO_RGB(a.so > 0 ? a.mtd / a.so : null))),
+      F(`IF(${cSo}${R}=0,"",(${cMtd}${R}-${cSo}${R})/${cSo}${R})`, PCT_Z, a.so > 0 ? gap / a.so : null, sTint(base, GAP_RGB(gap))),
+      F(`IF(MAX(${cSo}${R},${cMtd}${R})=0,0,ABS(${cMtd}${R}-${cSo}${R})/MAX(${cSo}${R},${cMtd}${R}))`, PCT_Z, den > 0 ? Math.abs(gap) / den : 0, sMismatch(base, den > 0 ? Math.abs(gap) / den : 0)),
+      F(`IF(${cGap}${R}>0.0005,"${STATUS.over.text}",IF(${cGap}${R}<-0.0005,"${STATUS.under.text}","${STATUS.match.text}"))`, null, STATUS[cls].text, sStatus(base, cls)),
+    ];
+  };
+
+  let R = 2;
+  function emit(n, depth, path, code) {
+    const base = sDepth(depth, n.children.length > 0);
+    const myRow = R++;
+    const pth = [...path, n.label];
+    const itemCode = n.code || code;
+    const placeholder = [];
+    grid.push(placeholder);
+    meta.push(depth ? { level: depth, hidden: true } : {});
+
+    const childRows = n.children.map((c) => emit(c, depth + 1, pth, itemCode));
+    const isLeaf = !n.children.length;
+    const sum = (c) => childRows.map((r) => `${c}${r}`).join(",");
+    const crit = [
+      ...pth.map((v, i) => `${q(DC[levels[i].key])},${unsafe(v) ? esc(v) : `$${col(i)}${myRow}`}`),
+      ...(itemCode ? [`${q(DC.item_code)},${unsafe(itemCode) ? esc(itemCode) : `$${cCode}${myRow}`}`] : []),
+    ].join(",");
+    const agg = (c, field, val) => (isLeaf ? F(`SUMIFS(${q(DC[field])},${crit})`, KG_Z, val, base) : F(`SUM(${sum(c)})`, KG_Z, val, base));
+
+    placeholder.push(
+      ...levels.map((l, i) => T(i < pth.length ? pth[i] : "", base)),
+      T(itemCode, sTint(base, "FF8B9992", false)),
+      T(isLeaf ? "Detail" : `L${depth + 1}`, base),
+      agg(cMo, "month_proj_kgs", n.month),
+      agg(cMtd, "mtd_proj_kgs", n.mtd),
+      agg(cSo, "so_kgs", n.so),
+      agg(cDis, "cat_a_dispatch_kgs", n.dis),
+      ...derived(myRow, n, base),
+    );
+    return myRow;
   }
-  return row;
-}
+  const rootRows = roots.map((n) => emit(n, 0, [], ""));
 
-function totalRow(ws, values, cols, gap) {
-  const row = ws.addRow(values);
-  row.eachCell({ includeEmpty: true }, (cell, i) => {
-    const c = cols[i - 1];
-    cell.font = { bold: true, color: { argb: c.k === "gap" ? (gap > 0 ? C.over : gap < 0 ? C.under : C.ink) : C.ink } };
-    cell.fill = fill(C.shade1);
-    cell.border = { top: { style: "medium", color: { argb: C.line } } };
-    if (c.fmt) cell.numFmt = c.fmt;
-  });
-}
-
-const ratio = (p, s) => (s > 0 ? p / s : null);
-
-/* ── hierarchical sheets ─────────────────────────────────────────── */
-
-function customerSheet(wb, name, custLeaves, mode, sort) {
-  // outlineLevelRow = deepest level, so every row opens expanded with the 1–5 buttons above.
-  const ws = wb.addWorksheet(name, { properties: { outlineLevelRow: 4, outlineProperties: { summaryBelow: false } } });
-  const cols = [
-    { h: "Customer Group › Customer › Item Group › Item Parent › Item Name", k: "name", w: 62 },
-    { h: "Item Code", k: "code", w: 18 },
-    { h: "Month proj kg", k: "month", w: 14, num: true, fmt: KG },
-    { h: "MTD proj kg", k: "mtd", w: 14, num: true, fmt: KG },
-    { h: "SO kg", k: "so", w: 14, num: true, fmt: KG },
-    { h: "Gap kg (MTD − SO)", k: "gap", w: 15, num: true, fmt: GAP },
-    { h: "MTD ÷ SO", k: "ratio", w: 10, num: true, fmt: PCT },
-    { h: "Status", k: "status", w: 11 },
-  ];
-  header(ws, cols);
-  const t = tree(custLeaves, sort, mode);
-  const line = (n, code) => [n.label, code || "", n.projFull, n.proj, n.so, n.gap, ratio(n.proj, n.so), ""];
-  for (const g of t.kids) {
-    dataRow(ws, line(g), { depth: 0, gap: g.gap, cols });
-    for (const c of g.kids) {
-      dataRow(ws, line(c), { depth: 1, leaf: true, strong: true, gap: c.gap, cols });
-      const sub = tree(c.leaf.items, sort, "all");
-      const walk = (n, d) => n.kids.forEach((k) => {
-        dataRow(ws, line(k, k.leaf?.code), { depth: d, leaf: !!k.leaf, gap: k.gap, cols });
-        if (!k.leaf) walk(k, d + 1);
-      });
-      walk(sub, 2);
-    }
+  // Grand total over the root rows only, so nothing is counted twice.
+  if (rootRows.length) {
+    const t = roots.reduce((s, n) => ({ month: s.month + n.month, mtd: s.mtd + n.mtd, so: s.so + n.so, dis: s.dis + n.dis }), { month: 0, mtd: 0, so: 0, dis: 0 });
+    const rs = (c) => rootRows.map((r) => `${c}${r}`).join(",");
+    const TR = R;
+    grid.push([
+      T("TOTAL", S_TOTAL), ...levels.slice(1).map(() => T("", S_TOTAL)), T("", S_TOTAL), T("Total", S_TOTAL),
+      F(`SUM(${rs(cMo)})`, KG_Z, t.month, S_TOTAL), F(`SUM(${rs(cMtd)})`, KG_Z, t.mtd, S_TOTAL),
+      F(`SUM(${rs(cSo)})`, KG_Z, t.so, S_TOTAL), F(`SUM(${rs(cDis)})`, KG_Z, t.dis, S_TOTAL),
+      ...derived(TR, t, S_TOTAL),
+    ]);
+    meta.push({});
   }
-  totalRow(ws, [`Total · ${custLeaves.length} customer${custLeaves.length === 1 ? "" : "s"}`, "", t.projFull, t.proj, t.so, t.gap, ratio(t.proj, t.so), ""], cols, t.gap);
-  return ws;
-}
-
-function itemSheet(wb, name, itemLeaves, mode, sort) {
-  const ws = wb.addWorksheet(name, { properties: { outlineLevelRow: 2, outlineProperties: { summaryBelow: false } } });
-  const cols = [
-    { h: "Item Group › Item Parent › Item Name", k: "name", w: 62 },
-    { h: "Item Code", k: "code", w: 18 },
-    { h: "Month proj kg", k: "month", w: 14, num: true, fmt: KG },
-    { h: "MTD proj kg", k: "mtd", w: 14, num: true, fmt: KG },
-    { h: "SO kg", k: "so", w: 14, num: true, fmt: KG },
-    { h: `of which ${CAT_A} kg`, k: "dis", w: 14, num: true, fmt: KG },
-    { h: "Gap kg (MTD − SO)", k: "gap", w: 15, num: true, fmt: GAP },
-    { h: "MTD ÷ SO", k: "ratio", w: 10, num: true, fmt: PCT },
-    { h: "Status", k: "status", w: 11 },
-  ];
-  header(ws, cols);
-  const t = tree(itemLeaves, sort, mode);
-  const line = (n) => [n.label, n.leaf?.code || "", n.projFull, n.proj, n.so, n.soDis, n.gap, ratio(n.proj, n.so), ""];
-  const walk = (n) => n.kids.forEach((k) => {
-    dataRow(ws, line(k), { depth: k.depth, leaf: !!k.leaf, gap: k.gap, cols });
-    if (!k.leaf) walk(k);
-  });
-  walk(t);
-  totalRow(ws, [`Total · ${itemLeaves.length} item${itemLeaves.length === 1 ? "" : "s"}`, "", t.projFull, t.proj, t.so, t.soDis, t.gap, ratio(t.proj, t.so), ""], cols, t.gap);
-  return ws;
-}
-
-/* ── summary ─────────────────────────────────────────────────────── */
-
-function summarySheet(wb, prepared, custLeaves, whLabel) {
-  const ws = wb.addWorksheet("Summary", { views: [{ showGridLines: false }] });
-  ws.columns = [{ width: 30 }, { width: 18 }, { width: 18 }, { width: 50 }];
-  const pr = prepared.prorate;
-  const period = prepared.projPeriods.map(ymLabel).join(", ") || "—";
-
-  const title = ws.addRow(["Projection vs SO"]);
-  title.font = { name: FONT, bold: true, size: 16, color: { argb: C.ink } };
-  title.height = 26;
-  const sub = ws.addRow([`${period} · ${whLabel} · exported ${new Date().toLocaleString("en-IN")}`]);
-  sub.font = { name: FONT, color: { argb: C.ink2 } };
-  ws.addRow([]);
-
-  // Period in short, as on the dashboard header.
-  const days = ws.addRow(["SO days / days in month", pr.on ? `${pr.soDays} / ${pr.monthDays}` : `— / ${pr.monthDays || "—"}`, pr.on ? pr.factor : null]);
-  days.getCell(1).font = { bold: true };
-  days.getCell(2).font = { bold: true, size: 13, color: { argb: C.over } };
-  days.getCell(3).numFmt = PCT;
-  days.getCell(3).font = { color: { argb: C.ink2 } };
-  days.getCell(4).value = pr.on ? "MTD projection = Month projection ÷ days in month × SO days" : pr.why;
-  days.getCell(4).font = { color: { argb: C.ink2 }, italic: true };
-  ws.addRow([]);
-
-  const sum = (f, a = custLeaves) => a.reduce((s, l) => s + l[f], 0);
-  const over = custLeaves.filter((l) => classify(l.gap) === "over");
-  const under = custLeaves.filter((l) => classify(l.gap) === "under");
-  const P = sum("proj"), S = sum("so");
-  const tiles = [
-    ["Month projection", sum("projFull"), "kg · Total KGs", null],
-    ["MTD projection", P, pr.on ? `${pr.soDays} of ${pr.monthDays} days` : "= month", null],
-    ["SO", S, `so tab ${Math.round(sum("soTab")).toLocaleString("en-IN")} · ${CAT_A} dispatches ${Math.round(sum("soDis")).toLocaleString("en-IN")}`, null],
-    ["Net gap (MTD − SO)", P - S, `MTD ÷ SO ${S > 0 ? Math.round((P / S) * 100) + "%" : "—"}`, P - S],
-    ["Over-projected", sum("gap", over), `${over.length} customer${over.length === 1 ? "" : "s"} with MTD proj > SO`, 1],
-    ["Under-projected", sum("gap", under), `${under.length} customer${under.length === 1 ? "" : "s"} with MTD proj < SO`, -1],
-  ];
-  const th = ws.addRow(["Measure", "kg", "", "Note"]);
-  th.eachCell((c) => { c.font = { bold: true, color: { argb: C.white } }; c.fill = fill(C.brand); });
-  for (const [k, v, note, sign] of tiles) {
-    const r = ws.addRow([k, v, "", note]);
-    r.getCell(1).font = { bold: true };
-    r.getCell(2).numFmt = sign == null ? KG : GAP;
-    r.getCell(2).font = { bold: true, size: 12, color: { argb: sign == null ? C.ink : sign > 0 ? C.over : sign < 0 ? C.under : C.ink } };
-    r.getCell(4).font = { color: { argb: C.ink2 } };
-    r.eachCell({ includeEmpty: true }, (c) => { c.border = { bottom: hair }; });
-  }
-  ws.addRow([]);
-
-  const rules = [
-    ["How it is built", ""],
-    ["Month projection", "projection › Total KGs"],
-    ["MTD projection", "Month projection ÷ days in month × unique Sales Order Dates in the so tab"],
-    ["SO", `so › Stock Qty in KGS (Customer Group ≠ ${CAT_A}) + dispatches › Stock Qty In Kg (Sales Channel = ${CAT_A}, Invoice Status ≠ Return)`],
-    ["Over / Under", "Status column — per customer and per item: MTD proj > SO is ▲ Over (blue), < SO is ▼ Under (red). Filter it from the header."],
-    ["Month filter", prepared.filterMonth ? period : "off — tabs compared as loaded"],
-    ["Outline", "Use the 1–5 buttons at the top left of the Customer and Item tabs to collapse or open levels"],
-  ];
-  rules.forEach(([a, b], i) => {
-    const r = ws.addRow([a, b]);
-    if (!i) { r.font = { name: FONT, bold: true, size: 12 }; return; }
-    r.getCell(1).font = { bold: true, color: { argb: C.ink2 } };
-    r.getCell(1).alignment = { vertical: "top" };
-    ws.mergeCells(r.number, 2, r.number, 4);
-    r.getCell(2).alignment = { wrapText: true, vertical: "top" };
-    if (b.length > 80) r.height = 30;   // merged cells do not grow on their own
-  });
-  ws.addRow([]);
-
-  const xh = ws.addRow(["Rows left out", "Rows", "Kg", "Reason"]);
-  xh.eachCell((c) => { c.font = { bold: true, color: { argb: C.white } }; c.fill = fill(C.brand); });
-  xh.getCell(4).alignment = { indent: 1 };
-  for (const e of prepared.exclusions) {
-    const r = ws.addRow([TAB_LABEL[e.tab], e.rows, e.kg, e.reason]);
-    r.getCell(2).numFmt = KG;
-    r.getCell(3).numFmt = KG;
-    r.getCell(4).alignment = { indent: 1 };
-    if (e.kind === "month") r.eachCell((c) => { c.fill = fill(C.warnBg); });
-    r.eachCell({ includeEmpty: true }, (c) => { c.border = { bottom: hair }; });
-  }
+  return { grid, meta };
 }
 
 /* ── the workbook ────────────────────────────────────────────────── */
 
-export async function exportWorkbook({ prepared, wh, sort = "gap" }) {
-  const ExcelJS = await loadExcelJS();
-  const wb = new ExcelJS.Workbook();
-  wb.creator = "Projection vs SO";
-  wb.created = new Date();
+export function exportWorkbook({ prepared, wh, sort = "gap" }) {
+  if (!window.XLSX?.utils) throw new Error("The Excel writer did not load — check the connection and reload");
+  DATA_FIELDS.forEach((f, i) => { DC[f] = XLSX.utils.encode_col(i); });
+  const wb = XLSX.utils.book_new();
+  const label = rowLabeler(prepared, wh);
+  const rows = wh ? prepared.rows.filter((r) => r.wh === wh) : prepared.rows;
+  const lastRow = Math.max(2, rows.length + 1);
+  const pr = prepared.prorate;
 
+  /* 1. Row-level data. */
+  const base = { border: BRD, font: { color: { rgb: "FF16192B" } } };
+  const derivedHeads = ["gap_kgs", "verdict"];
+  const dataGrid = [[...DATA_FIELDS, ...derivedHeads].map((h) => T(h, S_HEAD))];
+  const { mtd_proj_kgs: MT, so_kgs: SO } = DC;
+  rows.forEach((r, i) => {
+    const R = i + 2;
+    const l = label(r);
+    const month = r.src === "proj" ? r.fullQty : 0, mtd = r.src === "proj" ? r.qty : 0;
+    const so = r.src === "proj" ? 0 : r.qty, dis = r.src === "dis" ? r.qty : 0;
+    const gap = mtd - so;
+    dataGrid.push([
+      T(`CFA (${r.wh})`, base), T(l.cgroup, base), T(l.cust, base), T(l.group, base), T(l.parent, base), T(l.name, base), T(l.code, base),
+      T(ROW_TYPE[r.src], base), T(r.rawCust, base),
+      N(month, KG_Z, base), N(mtd, KG_Z, base), N(so, KG_Z, base), N(dis, KG_Z, base),
+      F(`${MT}${R}-${SO}${R}`, KG_Z, gap, sTint(base, GAP_RGB(gap))),
+      F(`IF(${MT}${R}>${SO}${R},"Over-projected",IF(${MT}${R}<${SO}${R},"Under-projected","On target"))`, null,
+        gap > 0 ? "Over-projected" : gap < 0 ? "Under-projected" : "On target", base),
+    ]);
+  });
+  const wide = { cfa: 11, customer_group: 18, customer: 30, item_group: 24, item_parent: 30, item_name: 46, item_code: 20, row_type: 18, source_customer: 30 };
+  const dws = addSheet(wb, DATA_SHEET, dataGrid, [...DATA_FIELDS.map((f) => ({ wch: wide[f] || 14 })), ...derivedHeads.map(() => ({ wch: 15 }))]);
+
+  /* 2. Filters, SO days and rows left out, parked to the right of the data
+        so they need no tab of their own and touch neither formulas nor filter. */
+  const period = prepared.projPeriods.map(ymLabel).join(", ") || "—";
+  const prov = [
+    ["FILTERS APPLIED", ""],
+    ["CFA", wh ? `CFA (${wh})` : "All CFAs"],
+    ["Projection month", period],
+    ["Only the projection month", prepared.filterMonth ? "Yes" : "No"],
+    ["SO days / days in month", pr.on ? `${pr.soDays} / ${pr.monthDays}` : `— / ${pr.monthDays || "—"}`],
+    ["MTD projection", pr.on ? `Month projection ÷ ${pr.monthDays} × ${pr.soDays} unique Sales Order Dates (${Math.round(pr.factor * 1000) / 10}%)` : pr.why],
+    ["SO", `so tab (Customer Group ≠ ${CAT_A}) + dispatches (Sales Channel = ${CAT_A}, Invoice Status ≠ Return)`],
+    ["Rows in this sheet", String(rows.length)],
+    ["Generated", new Date().toLocaleString("en-IN")],
+    ["", ""],
+    ["ROWS LEFT OUT", ""],
+    ...prepared.exclusions.map((e) => [`${TAB_LABEL[e.tab]} · ${e.reason}`, `${e.rows.toLocaleString("en-IN")} rows · ${Math.round(e.kg).toLocaleString("en-IN")} kg`]),
+  ];
+  const PROV_C = DATA_FIELDS.length + derivedHeads.length + 1;   // one blank column gap
+  prov.forEach((row, i) => row.forEach((v, j) => {
+    const cell = { t: "s", v: String(v) };
+    if (row[0] === "FILTERS APPLIED" || row[0] === "ROWS LEFT OUT") cell.s = S_HEAD;
+    else if (j === 0 && v) cell.s = { font: { bold: true, color: { rgb: "FF4A5060" } } };
+    dws[XLSX.utils.encode_cell({ r: i, c: PROV_C + j })] = cell;
+  }));
+  const dr = XLSX.utils.decode_range(dws["!ref"]);
+  dr.e.c = Math.max(dr.e.c, PROV_C + 1);
+  dr.e.r = Math.max(dr.e.r, prov.length - 1);
+  dws["!ref"] = XLSX.utils.encode_range(dr);
+  dws["!cols"][PROV_C] = { wch: 44 };
+  dws["!cols"][PROV_C + 1] = { wch: 70 };
+
+  /* 3. Pivots — every expandable row opens the next level down. */
   const cust = leaves(prepared, "customer", wh);
   const items = leaves(prepared, "item", wh);
-  const whLabel = wh ? `CFA (${wh})` : "All CFAs";
 
-  summarySheet(wb, prepared, cust, whLabel);
-  customerSheet(wb, "Customer", cust, "all", sort);
-  itemSheet(wb, "Item", items, "all", sort);
+  // Customer › Item: the dashboard's customer rows, each opened into its items.
+  const itemNodes = (t) => t.kids.map((k) => (k.leaf ? node(k, [], k.leaf.code) : node(k, itemNodes(k))));
+  const custRoots = tree(cust, sort, "all").kids.map((g) => node(g, g.kids.map((c) => node(c, itemNodes(tree(c.leaf.items, sort, "all"))))));
 
-  // Without a workbook window (<bookViews>) Excel can open the file with no
-  // visible sheet at all — a blank grey window, though the data is there.
-  wb.views = [{ x: 0, y: 0, width: 28800, height: 16000, firstSheet: 0, activeTab: 1, visibility: "visible" }];
+  // Item › Customer: each item opened into the customers who carry it.
+  const byItem = new Map();
+  const ik = (it) => (it.code ? "c:" + it.code.toLowerCase() : "n:" + it.path[2].toLowerCase());
+  for (const l of cust) for (const it of l.items) {
+    if (!byItem.has(ik(it))) byItem.set(ik(it), []);
+    byItem.get(ik(it)).push({ path: l.path, code: "", proj: it.proj, projFull: it.projFull, so: it.so, soTab: it.soTab, soDis: it.soDis, gap: it.gap });
+  }
+  const custUnder = (leaf) => tree(byItem.get(ik({ code: leaf.code, path: leaf.path })) || [], sort, "all").kids
+    .map((g) => node(g, g.kids.map((c) => node(c, []))));
+  const itemTree = (ls, mode, withCustomers) => tree(ls, mode === "all" ? sort : "gap", mode).kids.map((g) =>
+    node(g, g.kids.map((p) => node(p, p.kids.map((n) => node(n, withCustomers ? custUnder(n.leaf) : [], n.leaf.code))))));
 
-  // One typeface everywhere: a font set for colour or weight alone would
-  // otherwise drop back to the application default. Print landscape, one
-  // page wide.
-  wb.eachSheet((ws) => {
-    ws.eachRow({ includeEmpty: true }, (row) => row.eachCell({ includeEmpty: true }, (cell) => {
-      cell.font = { name: FONT, size: 10, ...(cell.font || {}) };
-    }));
-    ws.pageSetup = { orientation: "landscape", fitToPage: true, fitToWidth: 1, fitToHeight: 0, margins: { left: 0.4, right: 0.4, top: 0.5, bottom: 0.5, header: 0.2, footer: 0.2 } };
-    if (ws.name === "Summary") ws.properties.tabColor = { argb: C.brand };
-    else {
-      ws.pageSetup.printTitlesRow = "1:1";
-      // Filter buttons on the header, e.g. Status = ▼ Under.
-      // The range spans the data (not the Total row), so the dropdowns filter it.
-      ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: ws.rowCount - 1, column: ws.columnCount } };
-    }
-  });
+  const P = [
+    ["Customer Pivot", [["customer_group", "Customer Group"], ["customer", "Customer"], ["item_group", "Item Group"], ["item_parent", "Item Parent"], ["item_name", "Item Name"]], custRoots],
+    ["Item Pivot", [["item_group", "Item Group"], ["item_parent", "Item Parent"], ["item_name", "Item Name"], ["customer_group", "Customer Group"], ["customer", "Customer"]], itemTree(items, "all", true)],
+    ["Over-Projected", [["item_group", "Item Group"], ["item_parent", "Item Parent"], ["item_name", "Item Name"]], itemTree(items.filter((l) => classify(l.gap) === "over"), "over", false)],
+    ["Under-Projected", [["item_group", "Item Group"], ["item_parent", "Item Parent"], ["item_name", "Item Name"]], itemTree(items.filter((l) => classify(l.gap) === "under"), "under", false)],
+  ];
+  const wch = { customer_group: 18, customer: 30, item_group: 24, item_parent: 30, item_name: 46 };
+  for (const [name, lv, roots] of P) {
+    const levels = lv.map(([key, lab]) => ({ key, label: lab }));
+    const { grid, meta } = pivotSheet(roots, levels, lastRow);
+    addSheet(wb, name, grid, [...levels.map((l) => ({ wch: wch[l.key] })), { wch: 18 }, { wch: 8 },
+      { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 13 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 11 }, { wch: 10 }], meta);
+  }
 
-  const buf = await wb.xlsx.writeBuffer();
   const tag = [prepared.projPeriods[0] || "", wh || "all"].filter(Boolean).join("-");
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
-  a.download = `proj-vs-so-${tag}.xlsx`;
-  document.body.appendChild(a);
-  a.click();
-  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+  XLSX.writeFile(wb, `proj-vs-so-${tag}.xlsx`, { compression: true });
 }

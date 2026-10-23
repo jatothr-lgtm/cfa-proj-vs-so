@@ -99,24 +99,33 @@ adds a **Customer x Item** sheet with every customer-item pair.
 
 ## The Excel export
 
-Three tabs, styled like the dashboard (ExcelJS, loaded on the first export):
+Same format as
+[projection-analytics-dashboard](https://github.com/jatothr-lgtm/projection-analytics-dashboard):
+five tabs, written with `xlsx-js-style` (SheetJS 0.18.5 plus cell styles — the
+same library that reads the input).
 
-| Tab | What it holds |
+| Tab | Contents |
 |---|---|
-| Summary | Period, **SO days / days in month**, the six tiles, how it is built, rows left out |
-| Customer | Customer Group › Customer › Item Group › Item Parent › Item Name |
-| Item | Item Group › Item Parent › Item Name |
+| `All Conditions Applied` | Row-level data after every rule and filter — the only tab with literal numbers. Filters applied, **SO days / days in month**, the MTD formula and the rows left out sit to its right |
+| `Customer Pivot` | Customer Group → Customer → Item Group → Item Parent → Item Name |
+| `Item Pivot` | Item Group → Item Parent → Item Name → Customer Group → Customer |
+| `Over-Projected` | Item Group → Item Parent → Item Name where MTD proj > SO, worst first |
+| `Under-Projected` | Item Group → Item Parent → Item Name where SO > MTD proj, worst first |
 
-The breakdowns are Excel **outline levels** — the 1–5 buttons at the top left
-collapse or open a level, the same as the dashboard's arrows. Over / Under is the
-**Status** column (▲ Over blue, ▼ Under red, on every customer and item) with a
-filter dropdown on the header, rather than separate tabs. Gap figures carry the
-same colours, top-level groups are shaded, Month projection is grey, the header
-row and first column are frozen. Numbers use `#,##0`, which follows the reader's
-digit grouping (1,33,861 on an Indian locale).
+**Live formulas.** Pivot leaves are `SUMIFS` on the data tab, parents `SUM` their
+direct children, ratios are arithmetic on the row — edit a kg on the data tab and
+the workbook recalculates. Every formula is written with its cached result, so
+the file shows numbers before Excel recalculates.
 
-The workbook declares its window (`wb.views`): without one, desktop Excel can
-open the file to a blank grey window although every sheet holds data.
+**Click-to-expand.** Pivot rows use Excel's outline: each expandable row has a
+`+` in the left margin and its children start collapsed.
+
+**Columns.** Month Proj · MTD Proj · SO · Category A Disp · Gap (MTD − SO) ·
+SO / Proj % · Proj / SO % · Proj vs SO % · Mismatch % · Status.
+
+**Colours.** Indigo header, one tint per outline depth, bold total row,
+red → amber → green on Mismatch %, as in the reference. Over / under keep the
+dashboard's blue / red (gap, ratios and the ▲ Over / ▼ Under status).
 
 ## Files
 

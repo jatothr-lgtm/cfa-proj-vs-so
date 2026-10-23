@@ -6,7 +6,9 @@
 <title>Projection vs SO</title>
 <meta name="description" content="Projection against sales orders per CFA, by customer and by item, split into over- and under-projected.">
 <link rel="stylesheet" href="styles.css?v=5">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<!-- xlsx-js-style: SheetJS 0.18.5 (reads the input exactly as before) plus
+     cell-style writing for the export, as in projection-analytics-dashboard. -->
+<script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
 </head>
 <body>
 
@@ -82,6 +84,6 @@
 </main>
 
 <div class="toast" id="toast"></div>
-<script type="module" src="app.js?v=7"></script>
+<script type="module" src="app.js?v=8"></script>
 </body>
 </html>

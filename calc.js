@@ -350,6 +350,29 @@ function itemLabels(rows) {
 
 const itemKey = (r) => (r.code ? "c:" + key(r.code) : "n:" + key(r.name));
 
+/* Labels for each prepared row exactly as leaves() shows them — customer
+ * names first-seen with the projection first, item labels by Item Code — so
+ * the Excel export's row-level sheet and its SUMIFS pivots agree with the
+ * dashboard. Read-only: nothing in the comparison uses it. */
+export function rowLabeler(prepared, wh = "") {
+  const rows = wh ? prepared.rows.filter((r) => r.wh === wh) : prepared.rows;
+  const labels = itemLabels(prepared.rows);
+  const display = new Map();
+  for (const r of [...rows].sort((a, b) => (a.src === "proj" ? 0 : 1) - (b.src === "proj" ? 0 : 1))) {
+    const g = key(r.cgroup), c = key(r.cust);
+    if (!display.has("g|" + g)) display.set("g|" + g, r.cgroup || "(no customer group)");
+    if (!display.has("c|" + g + "|" + c)) display.set("c|" + g + "|" + c, r.cust || "(no customer)");
+  }
+  return (r) => {
+    const g = key(r.cgroup), l = labels.get(itemKey(r));
+    return {
+      cgroup: display.get("g|" + g),
+      cust: display.get("c|" + g + "|" + key(r.cust)),
+      group: l.group, parent: l.parent, name: l.name, code: l.code || "",
+    };
+  };
+}
+
 /* Leaf rows for one view: customer leaves or item leaves, each with
  * proj / so (and so split by source) for the chosen warehouse.
  * A customer leaf also carries `items`: its breakdown by Item Group ›
