@@ -29,8 +29,8 @@ each tab.
 Month proj = projection › Total KGs
 SO days    = unique Sales Order Dates in the so tab
 MTD proj   = Month proj ÷ days in the projection month × SO days   (per-day projection × SO days)
-SO         = so › Stock Qty in KGS            where Customer Group ≠ Category A
-           + dispatches › Stock Qty In Kg     where Sales Channel  = Category A
+SO         = so › Stock Qty in KGS            where Customer Group is not Category A / Amazon Retail India
+           + dispatches › Stock Qty In Kg     where Sales Channel  is     Category A / Amazon Retail India
                                                 and Invoice Status ≠ Return
 Gap        = MTD proj − SO
 Over       = Gap > 0      Under = Gap < 0      (per customer, or per item)
@@ -40,6 +40,12 @@ Over       = Gap > 0      Under = Gap < 0      (per customer, or per item)
   `CFA (XXX)` rows say which spelling in each tab is the same CFA. Without that
   tab the built-in GGN / BLR / MUM mapping is used. Everything else is left out
   and listed on the Data tab with its kg.
+- **Dispatch groups.** `DISPATCH_GROUPS` in `calc.js` lists the customer
+  groups whose SO comes from the dispatches tab instead of the so tab:
+  **Category A** and **Amazon Retail India**. Amazon's sales orders are all
+  raised at Branch / Origin Indore, so the so tab never places them at a CFA,
+  although the CFAs do dispatch to Amazon; its CFA dispatches stand in for SO,
+  as Category A's do. Add a group to the list to treat it the same way.
 - **Category A is one customer.** The projection books it to a single customer
   (GT Retail) while dispatches carry each distributor, so every Category A
   customer on both sides is added into one row.
@@ -54,7 +60,7 @@ Over       = Gap > 0      Under = Gap < 0      (per customer, or per item)
   tab. Gap, MTD ÷ SO and Over / Under all use MTD proj, so a part-month SO dump
   is compared with the matching share of the month. The days are counted over the **whole**
   so tab — every origin, before the Category A and warehouse rules — so every
-  CFA and customer, Category A included, is scaled by the same factor. With the
+  CFA and customer, the dispatch groups included, is scaled by the same factor. With the
   month filter on, only dates in the projection month count. The banner and the
   MTD projection tile show the day count (e.g. 29 of 30 days). With no usable
   SO dates, MTD proj falls back to the month and a warning says so. The export
@@ -106,7 +112,7 @@ same library that reads the input).
 
 | Tab | Contents |
 |---|---|
-| `All Conditions Applied` | Row-level data (target_month, CFA, labels, row type, month / MTD proj, SO, Category A dispatch) with per-row `diff_kgs`, `%` and `verdict` formulas. A **FILTERS APPLIED** block sits after one blank column: Target Month, CFA, the other filters, **SO days / days in month**, the MTD formula, rows after filters / in source, then the rows left out |
+| `All Conditions Applied` | Row-level data (target_month, CFA, labels, row type, month / MTD proj, SO, dispatch) with per-row `diff_kgs`, `%` and `verdict` formulas. A **FILTERS APPLIED** block sits after one blank column: Target Month, CFA, the other filters, **SO days / days in month**, the MTD formula, rows after filters / in source, then the rows left out |
 | `Customer Pivot` | Customer Group → Customer → Item Group → Item Parent → Item Name |
 | `Item Pivot` | Item Group → Item Parent → Item Name → Customer Group → Customer |
 | `Over-Projected` | Item Group → Item Parent → Item Name where MTD proj > SO, worst first |
@@ -122,7 +128,7 @@ literal criterion), parents `SUM` their direct children, ratios are arithmetic
 on the row; each formula carries its cached result. Formulas are plain ASCII and
 no `SUM` takes more than 250 arguments (larger parents nest).
 
-**Columns.** Month Proj · MTD Proj · SO · Category A Disp · Gap (MTD − SO) ·
+**Columns.** Month Proj · MTD Proj · SO · Dispatch (part of SO from dispatches) · Gap (MTD − SO) ·
 SO / Proj % · Proj / SO % · Proj vs SO % · Mismatch % · Status.
 
 **Colours.** Indigo header, one tint per depth, bold total row,

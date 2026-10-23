@@ -23,7 +23,7 @@
  * blue / red (gap, ratios, Status).
  */
 
-import { CAT_A, TAB_LABEL, leaves, tree, classify, ymLabel, rowLabeler } from "./calc.js?v=10";
+import { DISPATCH_GROUPS, TAB_LABEL, leaves, tree, classify, ymLabel, rowLabeler } from "./calc.js?v=11";
 
 const DATA_SHEET = "All Conditions Applied";
 const PCT_Z = "0.0%", KG_Z = "#,##0.00";
@@ -118,11 +118,11 @@ const sStatus = (base, cls) => ({ ...base, fill: { fgColor: { rgb: STATUS[cls].f
 
 const DATA_FIELDS = [
   "target_month", "cfa", "customer_group", "customer", "item_group", "item_parent", "item_name", "item_code",
-  "row_type", "source_customer", "month_proj_kgs", "mtd_proj_kgs", "so_kgs", "cat_a_dispatch_kgs",
+  "row_type", "source_customer", "month_proj_kgs", "mtd_proj_kgs", "so_kgs", "dispatch_kgs",
 ];
 const DERIVED = ["diff_kgs", "so_over_proj_pct", "proj_over_so_pct", "proj_vs_so_pct", "mismatch_pct", "verdict"];
 const DC = Object.fromEntries(DATA_FIELDS.map((f, i) => [f, null]));   // letters filled in below
-const ROW_TYPE = { proj: "Projection", so: "SO", dis: `${CAT_A} dispatch` };
+const ROW_TYPE = { proj: "Projection", so: "SO", dis: "Dispatch" };
 
 /* ── pivots ──────────────────────────────────────────────────────── */
 
@@ -158,7 +158,7 @@ function pivotSheet(roots, levels, lastRow) {
   const cMo = col(N_L + 1), cMtd = col(N_L + 2), cSo = col(N_L + 3), cDis = col(N_L + 4);
 
   const grid = [[...levels.map((l) => l.label), "Level", "Month Proj kgs", "MTD Proj kgs", "SO kgs",
-    `${CAT_A} Disp kgs`, "Gap kgs", "SO / Proj %", "Proj / SO %", "Proj vs SO %", "Mismatch %", "Status"].map((h) => T(h, S_HEAD))];
+    "Dispatch kgs", "Gap kgs", "SO / Proj %", "Proj / SO %", "Proj vs SO %", "Mismatch %", "Status"].map((h) => T(h, S_HEAD))];
   const meta = [{}];
 
   const derived = (R, a, base) => {
@@ -201,7 +201,7 @@ function pivotSheet(roots, levels, lastRow) {
       agg(cMo, "month_proj_kgs", n.month),
       agg(cMtd, "mtd_proj_kgs", n.mtd),
       agg(cSo, "so_kgs", n.so),
-      agg(cDis, "cat_a_dispatch_kgs", n.dis),
+      agg(cDis, "dispatch_kgs", n.dis),
       ...derived(myRow, n, base),
     );
     return myRow;
@@ -276,6 +276,7 @@ export function exportWorkbook({ prepared, wh, sort = "gap" }) {
     ["Item Parent", "All"],
     ["Item Name", "All"],
     ["Only the projection month", prepared.filterMonth ? "Yes" : "No"],
+    ["SO from dispatches for", DISPATCH_GROUPS.join(", ")],
     ["SO days / days in month", pr.on ? `${pr.soDays} / ${pr.monthDays}` : `- / ${pr.monthDays || "-"}`],
     ["MTD projection", pr.on ? `Month projection / ${pr.monthDays} x ${pr.soDays} unique Sales Order Dates (${Math.round(pr.factor * 1000) / 10}%)` : pr.why],
     ["Rows after filters", String(rows.length)],

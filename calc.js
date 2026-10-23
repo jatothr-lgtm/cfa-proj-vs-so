@@ -2,8 +2,8 @@
  *
  *   Month proj = projection tab, Total KGs
  *   MTD proj   = Month proj ÷ days in the month × SO days (distinct Sales Order Dates)
- *   SO         = so tab, Stock Qty in KGS, Customer Group ≠ Category A
- *              + dispatches tab, Stock Qty In Kg, Sales Channel = Category A,
+ *   SO         = so tab, Stock Qty in KGS, Customer Group not in DISPATCH_GROUPS
+ *              + dispatches tab, Stock Qty In Kg, Sales Channel in DISPATCH_GROUPS,
  *                Invoice Status ≠ Return
  *
  * Only the CFAs in the Normalisation tab are compared; each tab spells the
@@ -28,6 +28,16 @@ export const DEFAULT_WAREHOUSES = [
 export const CAT_A = "Category A";
 const CAT_A_KEY = "category a";
 const CAT_A_CUSTOMER = "Category A — all customers";
+
+/* Customer groups whose SO is taken from the dispatches tab (by Sales
+ * Channel) instead of the so tab (by Customer Group).
+ *   Category A           — projected as one customer, sold through ~140
+ *                          distributors; compared as one row.
+ *   Amazon Retail India  — its sales orders are all raised at Branch / Origin
+ *                          Indore, so the so tab never places them at a CFA,
+ *                          though the CFAs do dispatch to Amazon. Keeps its
+ *                          own customer name. */
+export const DISPATCH_GROUPS = [CAT_A, "Amazon Retail India"];
 
 /* Column aliases per tab. The first alias is the name in the current extract. */
 const COLS = {
@@ -88,6 +98,7 @@ const MONTHS = ["january","february","march","april","may","june","july","august
 const hkey = (s) => String(s ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
 export const clean = (s) => s == null ? "" : String(s).replace(/[\s ]+/g, " ").trim();
 const key = (s) => clean(s).toLowerCase();
+const DISPATCH_GROUP = new Map(DISPATCH_GROUPS.map((g) => [key(g), g]));
 
 const num = (v) => {
   if (typeof v === "number") return Number.isFinite(v) ? v : 0;
@@ -244,8 +255,8 @@ export function extractTab(tab, rows, headerRow) {
  *
  * Pro-rating: Projection = Total KGs ÷ days in the projection month × SO days,
  * where SO days = distinct Sales Order Dates in the so tab — counted over the
- * whole tab, before the Category A and warehouse rules, so every CFA and
- * customer (Category A included) is scaled by the same factor. With the month
+ * whole tab, before the dispatch-group and warehouse rules, so every CFA and
+ * customer (Category A and Amazon included) is scaled by the same factor. With the month
  * filter on, only dates inside the projection month count.
  */
 export function prepare(tabs, warehouses, { matchMonth = true, prorate = true } = {}) {
@@ -287,8 +298,9 @@ export function prepare(tabs, warehouses, { matchMonth = true, prorate = true } 
     for (const r of src.records) {
       if (r.total) { bump(tab, "Grand-total row", "rule", r.qty); continue; }
       const catA = key(r.cgroup) === CAT_A_KEY;
-      if (tab === "so" && catA) { bump(tab, "Customer Group = Category A (taken from dispatches instead)", "rule", r.qty); continue; }
-      if (tab === "dispatches" && !catA) { bump(tab, "Sales Channel ≠ Category A (taken from the so tab instead)", "rule", r.qty); continue; }
+      const viaDis = DISPATCH_GROUP.get(key(r.cgroup));   // canonical group name, or undefined
+      if (tab === "so" && viaDis) { bump(tab, `Customer Group = ${viaDis} (taken from dispatches instead)`, "rule", r.qty); continue; }
+      if (tab === "dispatches" && !viaDis) { bump(tab, `Sales Channel not ${DISPATCH_GROUPS.join(" / ")} (taken from the so tab instead)`, "rule", r.qty); continue; }
       if (tab === "dispatches" && key(r.status) === "return") { bump(tab, "Invoice Status = Return", "rule", r.qty); continue; }
       const wh = whMap[tab].get(key(r.wh));
       if (!wh) {
