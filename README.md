@@ -31,6 +31,7 @@ SO days    = unique Sales Order Dates in the so tab
 MTD proj   = Month proj ÷ days in the projection month × SO days   (per-day projection × SO days)
 SO         = so › Stock Qty in KGS            where Customer Group is not Category A / Amazon Retail India
            + dispatches › Stock Qty In Kg     where Sales Channel  is     Category A / Amazon Retail India
+           + pendency › Pending Kgs           where customer_group is     Category A / Amazon Retail India   (optional file)
                                                 and Invoice Status ≠ Return
 Gap        = MTD proj − SO
 Over       = Gap > 0      Under = Gap < 0      (per customer, or per item)
@@ -46,6 +47,15 @@ Over       = Gap > 0      Under = Gap < 0      (per customer, or per item)
   raised at Branch / Origin Indore, so the so tab never places them at a CFA,
   although the CFAs do dispatch to Amazon; its CFA dispatches stand in for SO,
   as Category A's do. Add a group to the list to treat it the same way.
+- **Pendency (optional 4th input).** For the dispatch groups only, SO also
+  adds the pendency file's `Pending Kgs` — the open orders not yet invoiced —
+  so their SO is *dispatched + still pending*. Rows count when `Origin` is one
+  of the CFAs (same mapping as the so tab's Origin), summed by customer group,
+  customer and CFA; every open order counts whatever its `Sales_Order_Date`
+  (the month filter does not apply to pendency). Rows for any other customer
+  group are left out and reported. Without the file the two groups fall back
+  to dispatches only, and the dashboard says so. The file is recognised by its
+  `Pending Kgs` and `Sales_Order_No` columns.
 - **Category A is one customer.** The projection books it to a single customer
   (GT Retail) while dispatches carry each distributor, so every Category A
   customer on both sides is added into one row.
@@ -128,7 +138,7 @@ literal criterion), parents `SUM` their direct children, ratios are arithmetic
 on the row; each formula carries its cached result. Formulas are plain ASCII and
 no `SUM` takes more than 250 arguments (larger parents nest).
 
-**Columns.** Month Proj · MTD Proj · SO · Dispatch (part of SO from dispatches) · Gap (MTD − SO) ·
+**Columns.** Month Proj · MTD Proj · SO · Dispatch · Pending (the parts of SO from dispatches and pendency) · Gap (MTD − SO) ·
 SO / Proj % · Proj / SO % · Proj vs SO % · Mismatch % · Status.
 
 **Colours.** Indigo header, one tint per depth, bold total row,

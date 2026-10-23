@@ -5,6 +5,8 @@
  *   SO         = so tab, Stock Qty in KGS, Customer Group not in DISPATCH_GROUPS
  *              + dispatches tab, Stock Qty In Kg, Sales Channel in DISPATCH_GROUPS,
  *                Invoice Status ≠ Return
+ *              + pendency tab (optional), Pending Kgs, customer_group in
+ *                DISPATCH_GROUPS — every open order, whatever its date
  *
  * Only the CFAs in the Normalisation tab are compared; each tab spells the
  * warehouse its own way and the Normalisation tab says which spellings are one
@@ -14,9 +16,11 @@
  * rows because the tabs label its parent differently.
  */
 
-export const TABS = ["projection", "so", "dispatches"];
+export const TABS = ["projection", "so", "dispatches"];          // required
+export const OPTIONAL_TABS = ["pendency"];
+export const ALL_TABS = [...TABS, ...OPTIONAL_TABS];
 
-export const TAB_LABEL = { projection: "Projection", so: "SO", dispatches: "Dispatches" };
+export const TAB_LABEL = { projection: "Projection", so: "SO", dispatches: "Dispatches", pendency: "Pendency" };
 
 /* Used when the workbook carries no Normalisation tab. */
 export const DEFAULT_WAREHOUSES = [
@@ -30,7 +34,8 @@ const CAT_A_KEY = "category a";
 const CAT_A_CUSTOMER = "Category A — all customers";
 
 /* Customer groups whose SO is taken from the dispatches tab (by Sales
- * Channel) instead of the so tab (by Customer Group).
+ * Channel) plus the pendency tab (by customer_group), instead of the so tab
+ * (by Customer Group): what was invoiced plus what is still open.
  *   Category A           — projected as one customer, sold through ~140
  *                          distributors; compared as one row.
  *   Amazon Retail India  — its sales orders are all raised at Branch / Origin
@@ -76,16 +81,29 @@ const COLS = {
     date:   ["invoice date"],
     status: ["invoice status"],
   },
+  pendency: {
+    wh:     ["origin"],
+    cgroup: ["customer_group", "customer group"],
+    cust:   ["customer"],
+    code:   ["item_code", "item code"],
+    group:  ["new mis item group"],
+    parent: ["item_parent", "item parent", "parent item"],
+    name:   ["item_name", "item name"],
+    qty:    ["pending kgs"],
+    date:   ["sales_order_date", "sales order date"],
+  },
 };
 
 const REQUIRED = {
   projection: ["wh", "cgroup", "cust", "group", "parent", "name", "qty"],
   so:         ["wh", "cgroup", "cust", "group", "parent", "name", "qty"],
   dispatches: ["wh", "cgroup", "cust", "group", "parent", "name", "qty", "status"],
+  pendency:   ["wh", "cgroup", "cust", "name", "qty"],
 };
 
 /* What tells the tabs apart, tried in this order. */
 const SIGNATURE = {
+  pendency:   ["pending kgs", "sales order no"],
   dispatches: ["from warehouse", "sales channel"],
   so:         ["origin", "customer group", "stock qty in kgs"],
   projection: ["total kgs"],
@@ -163,7 +181,7 @@ function colIndex(header, aliases) {
 /* Which input a sheet is, or null. `rows` is an array of row arrays. */
 export function classifySheet(name, rows) {
   if (/normali[sz]ation/i.test(name)) return { tab: "normalisation", headerRow: 0 };
-  for (const tab of ["dispatches", "so", "projection"]) {
+  for (const tab of ["pendency", "dispatches", "so", "projection"]) {
     const h = findHeader(rows, SIGNATURE[tab]);
     if (h !== -1) return { tab, headerRow: h };
   }
@@ -261,9 +279,10 @@ export function extractTab(tab, rows, headerRow) {
  */
 export function prepare(tabs, warehouses, { matchMonth = true, prorate = true } = {}) {
   const whMap = {};
-  for (const t of TABS) {
+  for (const t of ALL_TABS) {
     whMap[t] = new Map();
-    for (const w of warehouses) if (w[t]) whMap[t].set(key(w[t]), w.code);
+    // Pendency's Origin is spelt as the so tab's ("CFA (BLR)").
+    for (const w of warehouses) { const lab = t === "pendency" ? w.pendency || w.so : w[t]; if (lab) whMap[t].set(key(lab), w.code); }
   }
 
   const projPeriods = new Set();
@@ -291,15 +310,16 @@ export function prepare(tabs, warehouses, { matchMonth = true, prorate = true } 
   const outside = new Map();  // tab → Map(label → kg) for warehouses not compared
 
   const rows = [];
-  for (const tab of TABS) {
+  for (const tab of ALL_TABS) {
     const src = tabs[tab];
     if (!src) continue;
-    const src3 = tab === "projection" ? "proj" : tab === "so" ? "so" : "dis";
+    const src3 = { projection: "proj", so: "so", dispatches: "dis", pendency: "pen" }[tab];
     for (const r of src.records) {
       if (r.total) { bump(tab, "Grand-total row", "rule", r.qty); continue; }
       const catA = key(r.cgroup) === CAT_A_KEY;
       const viaDis = DISPATCH_GROUP.get(key(r.cgroup));   // canonical group name, or undefined
-      if (tab === "so" && viaDis) { bump(tab, `Customer Group = ${viaDis} (taken from dispatches instead)`, "rule", r.qty); continue; }
+      if (tab === "so" && viaDis) { bump(tab, `Customer Group = ${viaDis} (taken from dispatches + pendency instead)`, "rule", r.qty); continue; }
+      if (tab === "pendency" && !viaDis) { bump(tab, `customer_group not ${DISPATCH_GROUPS.join(" / ")} (pendency is used for those only)`, "rule", r.qty); continue; }
       if (tab === "dispatches" && !viaDis) { bump(tab, `Sales Channel not ${DISPATCH_GROUPS.join(" / ")} (taken from the so tab instead)`, "rule", r.qty); continue; }
       if (tab === "dispatches" && key(r.status) === "return") { bump(tab, "Invoice Status = Return", "rule", r.qty); continue; }
       const wh = whMap[tab].get(key(r.wh));
@@ -310,7 +330,8 @@ export function prepare(tabs, warehouses, { matchMonth = true, prorate = true } 
         m.set(lab, (m.get(lab) || 0) + r.qty);
         continue;
       }
-      if (filterMonth && tab !== "projection") {
+      // Pendency is every open order, whatever its date, so no month filter.
+      if (filterMonth && tab !== "projection" && tab !== "pendency") {
         if (!r.period) { bump(tab, "No readable date (kept)", "warn", r.qty); }
         else if (!projPeriods.has(r.period)) { bump(tab, `Outside the projection month (${ymLabel(r.period)})`, "month", r.qty); continue; }
       }
@@ -332,13 +353,13 @@ export function prepare(tabs, warehouses, { matchMonth = true, prorate = true } 
     }
   }
 
-  return { rows, exclusions: ex, outside, projPeriods: [...projPeriods].sort(), filterMonth, prorate: pr };
+  return { rows, exclusions: ex, outside, projPeriods: [...projPeriods].sort(), filterMonth, prorate: pr, hasPendency: !!tabs.pendency };
 }
 
 /* Labels for each item, keyed on Item Code: first non-blank of
  * projection → so → dispatches, level by level. */
 function itemLabels(rows) {
-  const rank = { proj: 0, so: 1, dis: 2 };
+  const rank = { proj: 0, so: 1, dis: 2, pen: 3 };
   const best = new Map();
   for (const r of rows) {
     const k = itemKey(r);
@@ -396,10 +417,13 @@ export function leaves(prepared, view, wh = "") {
   const display = new Map();   // key → first label seen, projection first
   const ordered = [...rows].sort((a, b) => (a.src === "proj" ? 0 : 1) - (b.src === "proj" ? 0 : 1));
   const labels = itemLabels(prepared.rows);
-  const blank = (path, code) => ({ path, code, proj: 0, projFull: 0, so: 0, soTab: 0, soDis: 0 });
+  const blank = (path, code) => ({ path, code, proj: 0, projFull: 0, so: 0, soTab: 0, soDis: 0, soPen: 0 });
   const add = (o, r) => {
     if (r.src === "proj") { o.proj += r.qty; o.projFull += r.fullQty; }
-    else { o.so += r.qty; if (r.src === "so") o.soTab += r.qty; else o.soDis += r.qty; }
+    else {
+      o.so += r.qty;
+      if (r.src === "so") o.soTab += r.qty; else if (r.src === "dis") o.soDis += r.qty; else o.soPen += r.qty;
+    }
   };
 
   for (const r of ordered) {
@@ -445,16 +469,16 @@ export const classify = (gap) => (gap > EPS ? "over" : gap < -EPS ? "under" : "m
 
 /* Nest leaves into a tree by their path. Every node carries its totals. */
 export function tree(leafRows, sortBy = "gap", mode = "all") {
-  const root = { label: "Total", children: new Map(), proj: 0, projFull: 0, so: 0, soDis: 0, n: 0, depth: -1 };
+  const root = { label: "Total", children: new Map(), proj: 0, projFull: 0, so: 0, soDis: 0, soPen: 0, n: 0, depth: -1 };
   for (const l of leafRows) {
     let node = root;
-    node.proj += l.proj; node.projFull += l.projFull; node.so += l.so; node.soDis += l.soDis; node.n++;
+    node.proj += l.proj; node.projFull += l.projFull; node.so += l.so; node.soDis += l.soDis; node.soPen += l.soPen; node.n++;
     l.path.forEach((label, d) => {
       const last = d === l.path.length - 1;
       const k = last ? label + "\u0000" + (l.code || "") : label;
       let c = node.children.get(k);
-      if (!c) node.children.set(k, (c = { label, children: new Map(), proj: 0, projFull: 0, so: 0, soDis: 0, n: 0, depth: d, leaf: last ? l : null }));
-      c.proj += l.proj; c.projFull += l.projFull; c.so += l.so; c.soDis += l.soDis; c.n++;
+      if (!c) node.children.set(k, (c = { label, children: new Map(), proj: 0, projFull: 0, so: 0, soDis: 0, soPen: 0, n: 0, depth: d, leaf: last ? l : null }));
+      c.proj += l.proj; c.projFull += l.projFull; c.so += l.so; c.soDis += l.soDis; c.soPen += l.soPen; c.n++;
       node = c;
     });
   }

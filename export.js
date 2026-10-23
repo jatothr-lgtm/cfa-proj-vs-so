@@ -23,7 +23,7 @@
  * blue / red (gap, ratios, Status).
  */
 
-import { DISPATCH_GROUPS, TAB_LABEL, leaves, tree, classify, ymLabel, rowLabeler } from "./calc.js?v=11";
+import { DISPATCH_GROUPS, TAB_LABEL, leaves, tree, classify, ymLabel, rowLabeler } from "./calc.js?v=12";
 
 const DATA_SHEET = "All Conditions Applied";
 const PCT_Z = "0.0%", KG_Z = "#,##0.00";
@@ -118,17 +118,17 @@ const sStatus = (base, cls) => ({ ...base, fill: { fgColor: { rgb: STATUS[cls].f
 
 const DATA_FIELDS = [
   "target_month", "cfa", "customer_group", "customer", "item_group", "item_parent", "item_name", "item_code",
-  "row_type", "source_customer", "month_proj_kgs", "mtd_proj_kgs", "so_kgs", "dispatch_kgs",
+  "row_type", "source_customer", "month_proj_kgs", "mtd_proj_kgs", "so_kgs", "dispatch_kgs", "pending_kgs",
 ];
 const DERIVED = ["diff_kgs", "so_over_proj_pct", "proj_over_so_pct", "proj_vs_so_pct", "mismatch_pct", "verdict"];
 const DC = Object.fromEntries(DATA_FIELDS.map((f, i) => [f, null]));   // letters filled in below
-const ROW_TYPE = { proj: "Projection", so: "SO", dis: "Dispatch" };
+const ROW_TYPE = { proj: "Projection", so: "SO", dis: "Dispatch", pen: "Pendency" };
 
 /* ── pivots ──────────────────────────────────────────────────────── */
 
 /* Our trees (calc.tree) → one node shape: label, code, the four sums, children. */
 function node(n, children, code) {
-  return { label: n.label, code: code || n.leaf?.code || "", month: n.projFull, mtd: n.proj, so: n.so, dis: n.soDis, children };
+  return { label: n.label, code: code || n.leaf?.code || "", month: n.projFull, mtd: n.proj, so: n.so, dis: n.soDis, pen: n.soPen, children };
 }
 
 /* SUMIFS criteria. Labels are matched by cell reference, as in the reference;
@@ -155,10 +155,10 @@ function pivotSheet(roots, levels, lastRow) {
   const col = (i) => XLSX.utils.encode_col(i);
   const q = (c) => `'${DATA_SHEET}'!$${c}$2:$${c}$${lastRow}`;
   const N_L = levels.length;
-  const cMo = col(N_L + 1), cMtd = col(N_L + 2), cSo = col(N_L + 3), cDis = col(N_L + 4);
+  const cMo = col(N_L + 1), cMtd = col(N_L + 2), cSo = col(N_L + 3), cDis = col(N_L + 4), cPen = col(N_L + 5);
 
   const grid = [[...levels.map((l) => l.label), "Level", "Month Proj kgs", "MTD Proj kgs", "SO kgs",
-    "Dispatch kgs", "Gap kgs", "SO / Proj %", "Proj / SO %", "Proj vs SO %", "Mismatch %", "Status"].map((h) => T(h, S_HEAD))];
+    "Dispatch kgs", "Pending kgs", "Gap kgs", "SO / Proj %", "Proj / SO %", "Proj vs SO %", "Mismatch %", "Status"].map((h) => T(h, S_HEAD))];
   const meta = [{}];
 
   const derived = (R, a, base) => {
@@ -202,6 +202,7 @@ function pivotSheet(roots, levels, lastRow) {
       agg(cMtd, "mtd_proj_kgs", n.mtd),
       agg(cSo, "so_kgs", n.so),
       agg(cDis, "dispatch_kgs", n.dis),
+      agg(cPen, "pending_kgs", n.pen),
       ...derived(myRow, n, base),
     );
     return myRow;
@@ -209,13 +210,13 @@ function pivotSheet(roots, levels, lastRow) {
   const rootRows = roots.map((n) => emit(n, 0, [], ""));
 
   if (rootRows.length) {
-    const t = roots.reduce((s, n) => ({ month: s.month + n.month, mtd: s.mtd + n.mtd, so: s.so + n.so, dis: s.dis + n.dis }), { month: 0, mtd: 0, so: 0, dis: 0 });
+    const t = roots.reduce((s, n) => ({ month: s.month + n.month, mtd: s.mtd + n.mtd, so: s.so + n.so, dis: s.dis + n.dis, pen: s.pen + n.pen }), { month: 0, mtd: 0, so: 0, dis: 0, pen: 0 });
     const rs = (c) => sumOf(rootRows.map((r) => `${c}${r}`));
     const TR = R;
     grid.push([
       T("TOTAL", S_TOTAL), ...levels.slice(1).map(() => T("", S_TOTAL)), T("Total", S_TOTAL),
       F(rs(cMo), KG_Z, t.month, S_TOTAL), F(rs(cMtd), KG_Z, t.mtd, S_TOTAL),
-      F(rs(cSo), KG_Z, t.so, S_TOTAL), F(rs(cDis), KG_Z, t.dis, S_TOTAL),
+      F(rs(cSo), KG_Z, t.so, S_TOTAL), F(rs(cDis), KG_Z, t.dis, S_TOTAL), F(rs(cPen), KG_Z, t.pen, S_TOTAL),
       ...derived(TR, t, S_TOTAL),
     ]);
     meta.push({});
@@ -242,13 +243,13 @@ export function exportWorkbook({ prepared, wh, sort = "gap" }) {
     const R = i + 2;
     const l = label(r);
     const month = r.src === "proj" ? r.fullQty : 0, mtd = r.src === "proj" ? r.qty : 0;
-    const so = r.src === "proj" ? 0 : r.qty, dis = r.src === "dis" ? r.qty : 0;
+    const so = r.src === "proj" ? 0 : r.qty, dis = r.src === "dis" ? r.qty : 0, pen = r.src === "pen" ? r.qty : 0;
     const diff = mtd - so, den = Math.max(so, mtd);
     const verdict = mtd > so ? "Over-projected" : mtd < so ? "Under-projected" : "On target";
     dataGrid.push([
       T(r.period ? ymLabel(r.period) : "", base), T(`CFA (${r.wh})`, base), T(l.cgroup, base), T(l.cust, base),
       T(l.group, base), T(l.parent, base), T(l.name, base), T(l.code, base), T(ROW_TYPE[r.src], base), T(r.rawCust, base),
-      N(month, KG_Z, base), N(mtd, KG_Z, base), N(so, KG_Z, base), N(dis, KG_Z, base),
+      N(month, KG_Z, base), N(mtd, KG_Z, base), N(so, KG_Z, base), N(dis, KG_Z, base), N(pen, KG_Z, base),
       F(`${MT}${R}-${SO}${R}`, KG_Z, diff, sTint(base, GAP_RGB(diff))),
       F(`IF(${MT}${R}=0,"",${SO}${R}/${MT}${R})`, PCT_Z, mtd > 0 ? so / mtd : null, sTint(base, RATIO_RGB(so > 0 ? mtd / so : null))),
       F(`IF(${SO}${R}=0,"",${MT}${R}/${SO}${R})`, PCT_Z, so > 0 ? mtd / so : null, sTint(base, RATIO_RGB(so > 0 ? mtd / so : null))),
@@ -276,7 +277,8 @@ export function exportWorkbook({ prepared, wh, sort = "gap" }) {
     ["Item Parent", "All"],
     ["Item Name", "All"],
     ["Only the projection month", prepared.filterMonth ? "Yes" : "No"],
-    ["SO from dispatches for", DISPATCH_GROUPS.join(", ")],
+    ["SO from dispatches + pendency for", DISPATCH_GROUPS.join(", ")],
+    ["Pendency", prepared.hasPendency ? "Loaded: Pending Kgs where Origin is a CFA, every open order whatever its date" : "Not loaded: those groups are dispatches only"],
     ["SO days / days in month", pr.on ? `${pr.soDays} / ${pr.monthDays}` : `- / ${pr.monthDays || "-"}`],
     ["MTD projection", pr.on ? `Month projection / ${pr.monthDays} x ${pr.soDays} unique Sales Order Dates (${Math.round(pr.factor * 1000) / 10}%)` : pr.why],
     ["Rows after filters", String(rows.length)],
@@ -312,7 +314,7 @@ export function exportWorkbook({ prepared, wh, sort = "gap" }) {
   const ik = (it) => (it.code ? "c:" + it.code.toLowerCase() : "n:" + it.path[2].toLowerCase());
   for (const l of cust) for (const it of l.items) {
     if (!byItem.has(ik(it))) byItem.set(ik(it), []);
-    byItem.get(ik(it)).push({ path: l.path, code: "", proj: it.proj, projFull: it.projFull, so: it.so, soTab: it.soTab, soDis: it.soDis, gap: it.gap });
+    byItem.get(ik(it)).push({ path: l.path, code: "", proj: it.proj, projFull: it.projFull, so: it.so, soTab: it.soTab, soDis: it.soDis, soPen: it.soPen, gap: it.gap });
   }
   const custUnder = (leaf) => tree(byItem.get(ik({ code: leaf.code, path: leaf.path })) || [], sort, "all").kids
     .map((g) => node(g, g.kids.map((c) => node(c, []))));
@@ -330,7 +332,7 @@ export function exportWorkbook({ prepared, wh, sort = "gap" }) {
     const levels = lv.map(([key, lab]) => ({ key, label: lab }));
     const { grid, meta } = pivotSheet(roots, levels, lastRow);
     addSheet(wb, name, grid, [...levels.map((l) => ({ wch: wch[l.key] })), { wch: 9 },
-      { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 13 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 11 }, { wch: 16 }], meta);
+      { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 13 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 11 }, { wch: 16 }], meta);
   }
 
   const tag = [prepared.projPeriods[0] || "", wh || "all"].filter(Boolean).join("-");

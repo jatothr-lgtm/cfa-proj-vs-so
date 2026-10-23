@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Projection vs SO</title>
 <meta name="description" content="Projection against sales orders per CFA, by customer and by item, split into over- and under-projected.">
-<link rel="stylesheet" href="styles.css?v=11">
+<link rel="stylesheet" href="styles.css?v=12">
 <!-- xlsx-js-style: SheetJS 0.18.5 (reads the input exactly as before) plus
      cell-style writing for the export, as in projection-analytics-dashboard. -->
 <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
@@ -31,7 +31,7 @@
     <h2>Inputs</h2>
     <p class="sub">
       Drop the workbook with the <b>projection</b>, <b>so</b> and <b>dispatches</b> tabs
-      (and the <b>Normalisation</b> tab), or the three files separately. Tabs are recognised
+      (and the <b>Normalisation</b> tab), or the files separately. A <b>pendency</b> file is optional and only feeds Category A and Amazon Retail India. Tabs are recognised
       by their columns, not their names. Everything is read in this browser; nothing is uploaded.
     </p>
     <label class="drop" id="drop">
@@ -84,6 +84,6 @@
 </main>
 
 <div class="toast" id="toast"></div>
-<script type="module" src="app.js?v=11"></script>
+<script type="module" src="app.js?v=12"></script>
 </body>
 </html>

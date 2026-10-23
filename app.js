@@ -1,11 +1,11 @@
 /* Projection vs SO — loading, views and export. The rules live in calc.js. */
 
 import {
-  TABS, TAB_LABEL, DEFAULT_WAREHOUSES, CAT_A, DISPATCH_GROUPS,
+  TABS, ALL_TABS, TAB_LABEL, DEFAULT_WAREHOUSES, CAT_A, DISPATCH_GROUPS,
   classifySheet, parseNormalisation, extractTab, prepare, leaves, tree, classify, ymLabel,
-} from "./calc.js?v=11";
-import { groupBars, gapBars } from "./charts.js?v=11";
-import { exportWorkbook } from "./export.js?v=11";
+} from "./calc.js?v=12";
+import { groupBars, gapBars } from "./charts.js?v=12";
+import { exportWorkbook } from "./export.js?v=12";
 
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -70,7 +70,7 @@ async function loadFiles(files) {
         state.tabs[c.tab] = { ...extractTab(c.tab, rows, c.headerRow), file: f.name, sheet: name, headerRow: c.headerRow };
         found++;
       }
-      if (!found) state.notes.push({ kind: "err", msg: `${f.name}: no projection, so or dispatches sheet recognised.` });
+      if (!found) state.notes.push({ kind: "err", msg: `${f.name}: no projection, so, dispatches or pendency sheet recognised.` });
     } catch (e) {
       console.error(e);
       state.notes.push({ kind: "err", msg: `${f.name} could not be read: ${e.message}` });
@@ -85,7 +85,7 @@ async function loadFiles(files) {
 }
 
 function recompute() {
-  const ok = TABS.filter((t) => state.tabs[t] && !state.tabs[t].missing.length);
+  const ok = ALL_TABS.filter((t) => state.tabs[t] && !state.tabs[t].missing.length);
   const usable = Object.fromEntries(ok.map((t) => [t, state.tabs[t]]));
   state.prepared = ok.length ? prepare(usable, state.warehouses, { matchMonth: state.ui.matchMonth }) : null;
   state.ui.open = { customer: null, item: null };
@@ -132,8 +132,9 @@ function renderSlots() {
     projection: "Wareouse · Customer Group · Customer · Item Group · Item Parent · Item Name · Total KGs",
     so: "Origin · Customer Group · Customer · NEW MIS ITEM GROUP · Parent Item · Item Name · Stock Qty in KGS",
     dispatches: "From Warehouse · Sales Channel · Customer · New Mis Item Group · Item Parent · Item Name · Stock Qty In Kg · Invoice Status",
+    pendency: `Optional · Origin · customer_group · Customer · Item_Code · Item_Name · Pending Kgs — used for ${DISPATCH_GROUPS.join(" and ")} only`,
   };
-  $("#slots").innerHTML = TABS.map((t) => {
+  $("#slots").innerHTML = ALL_TABS.map((t) => {
     const s = state.tabs[t];
     let body;
     if (!s) body = `<div class="state muted">Not loaded</div>`;
@@ -141,11 +142,11 @@ function renderSlots() {
       const months = [...s.periods.entries()].sort().map(([p, n]) => `${ymLabel(p)} <span class="muted">(${nf0.format(n)})</span>`).join(", ") || "<span class='muted'>no dates</span>";
       body = `<div class="state"><b>${esc(s.file)}</b> › ${esc(s.sheet)}<br>
         ${nf0.format(s.records.length)} rows${s.headerRow ? ` · header on row ${s.headerRow + 1}` : ""}<br>
-        ${t === "projection" ? "Month" : t === "so" ? "Sales Order Date" : "Invoice Date"}: ${months}</div>
+        ${{ projection: "Month", so: "Sales Order Date", dispatches: "Invoice Date", pendency: "Sales_Order_Date" }[t]}: ${months}</div>
         ${s.missing.length ? `<div class="banner err">Missing column${s.missing.length > 1 ? "s" : ""}: <b>${s.missing.map(esc).join(", ")}</b> — this tab is not used.</div>` : ""}`;
     }
     return `<div class="slot ${s ? "has" : ""}"><div class="hd"><strong>${TAB_LABEL[t]}</strong>
-      <span class="src ${s ? "fresh" : "empty"}">${s ? (s.missing.length ? "unusable" : "loaded") : "empty"}</span></div>
+      <span class="src ${s ? "fresh" : "empty"}">${s ? (s.missing.length ? "unusable" : "loaded") : TABS.includes(t) ? "empty" : "optional"}</span></div>
       <div class="hint">${hint[t]}</div>${body}</div>`;
   }).join("");
 }
@@ -165,8 +166,9 @@ function renderData() {
       <dt>SO days</dt><dd>distinct Sales Order Dates in the <b>so</b> tab, one count for every CFA and customer</dd>
       <dt>SO</dt><dd><b>so</b> › Stock Qty in KGS where Customer Group is not ${DISPATCH_GROUPS.join(" / ")}</dd>
       <dt>+</dt><dd><b>dispatches</b> › Stock Qty In Kg where Sales Channel is ${DISPATCH_GROUPS.join(" / ")}, Invoice Status ≠ Return</dd>
+      <dt>+</dt><dd><b>pendency</b> › Pending Kgs where customer_group is ${DISPATCH_GROUPS.join(" / ")} and Origin is a CFA — every open order, whatever its date (optional file)</dd>
       <dt>${CAT_A}</dt><dd>compared as one customer: every ${CAT_A} customer on either side is added into one row</dd>
-      <dt>Amazon Retail India</dt><dd>its sales orders are raised at Origin Indore, so its SO is what the CFAs dispatched to it</dd>
+      <dt>Amazon Retail India</dt><dd>its sales orders are raised at Origin Indore, so its SO is what the CFAs dispatched to it plus its open CFA pendency</dd>
       <dt>Item Group</dt><dd>projection › Item Group · so › NEW MIS ITEM GROUP · dispatches › New Mis Item Group</dd>
       <dt>Items</dt><dd>matched on Item Code; labels taken from the projection first, then so, then dispatches</dd>
       <dt>Over / Under</dt><dd>decided per customer or per item on MTD proj: MTD proj &gt; SO is over, MTD proj &lt; SO is under</dd>
@@ -199,6 +201,9 @@ function banners() {
   if (missing.length) {
     out.push(`<div class="banner warn"><b>${missing.map((t) => TAB_LABEL[t]).join(", ")} not loaded.</b>
       Its kg count as zero below, so ${missing.includes("projection") ? "everything reads under-projected" : missing.includes("dispatches") ? `${DISPATCH_GROUPS.join(" and ")} read fully over-projected` : "every customer outside " + DISPATCH_GROUPS.join(" / ") + " reads over-projected"} — load it on the Data tab.</div>`);
+  }
+  if (TABS.every((t) => state.tabs[t] && !state.tabs[t].missing.length) && (!state.tabs.pendency || state.tabs.pendency.missing.length)) {
+    out.push(`<div class="banner info">Pendency not loaded — ${DISPATCH_GROUPS.join(" and ")} SO is their CFA dispatches only; open orders are not counted.</div>`);
   }
   const p = state.prepared;
   if (p) {
@@ -244,7 +249,7 @@ function currentLeaves(view) {
     const items = l.items.filter((it) => matches(it, q));
     if (!items.length) continue;
     const r = { ...l, items };
-    for (const f of ["proj", "projFull", "so", "soTab", "soDis"]) r[f] = items.reduce((a, it) => a + it[f], 0);
+    for (const f of ["proj", "projFull", "so", "soTab", "soDis", "soPen"]) r[f] = items.reduce((a, it) => a + it[f], 0);
     r.gap = r.proj - r.so;
     out.push(r);
   }
@@ -289,13 +294,13 @@ function renderCompare() {
 
   // Tiles always describe the whole view, whatever the mode.
   const sum = (a, f) => a.reduce((s, l) => s + l[f], 0);
-  const P = sum(all, "proj"), PF = sum(all, "projFull"), S = sum(all, "so"), ST = sum(all, "soTab"), SD = sum(all, "soDis");
+  const P = sum(all, "proj"), PF = sum(all, "projFull"), S = sum(all, "so"), ST = sum(all, "soTab"), SD = sum(all, "soDis"), SP = sum(all, "soPen");
   const OV = sum(by.over, "gap"), UN = sum(by.under, "gap");
   const unit = view === "customer" ? "customer" : "item";
   $("#cmpTiles").innerHTML = state.prepared ? `
     <div class="tile"><div class="k">Month projection</div><div class="v" data-n="${PF}">${kg(PF)}</div><div class="m">kg · Total KGs</div></div>
     <div class="tile"><div class="k">MTD projection</div><div class="v" data-n="${P}">${kg(P)}</div>${daysMeter()}</div>
-    <div class="tile"><div class="k">SO</div><div class="v" data-n="${S}">${kg(S)}</div><div class="m">so tab ${kg(ST)} · dispatches (${DISPATCH_GROUPS.join(", ")}) ${kg(SD)}</div></div>
+    <div class="tile"><div class="k">SO</div><div class="v" data-n="${S}">${kg(S)}</div><div class="m">so tab ${kg(ST)} · ${DISPATCH_GROUPS.join(" + ")}: dispatches ${kg(SD)} · pendency ${kg(SP)}</div></div>
     <div class="tile"><div class="k">Net gap</div><div class="v" data-n="${P - S}" data-signed="1">${signed(P - S)}</div><div class="m">MTD proj − SO · MTD ÷ SO ${ratio(P, S)}</div></div>
     <div class="tile"><div class="k">Over-projected</div><div class="v" data-n="${OV}" data-signed="1"><i class="dot" style="background:var(--viz-over)"></i>${signed(OV)}</div><div class="m">${by.over.length} ${unit}${by.over.length === 1 ? "" : "s"} with MTD proj &gt; SO</div></div>
     <div class="tile"><div class="k">Under-projected</div><div class="v" data-n="${UN}" data-signed="1"><i class="dot" style="background:var(--viz-under)"></i>${signed(UN)}</div><div class="m">${by.under.length} ${unit}${by.under.length === 1 ? "" : "s"} with MTD proj &lt; SO</div></div>` : "";
@@ -349,7 +354,7 @@ function renderCompare() {
         <td class="num muted">${kg(k.projFull)}</td>
         <td class="num">${kg(k.proj)}</td>
         <td class="num">${kg(k.so)}</td>
-        ${view === "item" ? `<td class="num muted">${kg(k.soDis)}</td>` : ""}
+        ${view === "item" ? `<td class="num muted">${kg(k.soDis + k.soPen)}</td>` : ""}
         <td class="num gap-${cls}">${signed(k.gap)}</td>
         <td class="num">${ratio(k.proj, k.so)}</td>
         <td>${isLeaf ? `<span class="band band-${cls}">${BAND[cls]}</span>` : ""}</td>
@@ -362,9 +367,9 @@ function renderCompare() {
     ? `<th class="l">Customer Group › Customer › Item Group › Item Parent › Item Name</th>`
     : `<th class="l">Item Group › Item Parent › Item Name</th>`;
   $("#cmpBody").innerHTML = `<div class="tblwrap"><table>
-    <thead><tr>${head}<th title="Total KGs for the whole month">Month proj kg</th><th title="Month proj ÷ days in month × unique Sales Order Dates">MTD proj kg</th><th>SO kg</th>${view === "item" ? `<th title="Part of SO taken from dispatches: ${DISPATCH_GROUPS.join(", ")}">of which dispatches</th>` : ""}<th title="MTD proj − SO">Gap kg</th><th>MTD ÷ SO</th><th>Status</th></tr></thead>
+    <thead><tr>${head}<th title="Total KGs for the whole month">Month proj kg</th><th title="Month proj ÷ days in month × unique Sales Order Dates">MTD proj kg</th><th>SO kg</th>${view === "item" ? `<th title="Part of SO taken from dispatches + pendency: ${DISPATCH_GROUPS.join(", ")}">of which disp. + pend.</th>` : ""}<th title="MTD proj − SO">Gap kg</th><th>MTD ÷ SO</th><th>Status</th></tr></thead>
     <tbody>${rows.join("")}</tbody>
-    <tfoot><tr><td class="l">Total · ${shown.length} ${unit}${shown.length === 1 ? "" : "s"}</td><td class="num muted">${kg(t.projFull)}</td><td class="num">${kg(t.proj)}</td><td class="num">${kg(t.so)}</td>${view === "item" ? `<td class="num muted">${kg(t.soDis)}</td>` : ""}<td class="num">${signed(t.gap)}</td><td class="num">${ratio(t.proj, t.so)}</td><td></td></tr></tfoot>
+    <tfoot><tr><td class="l">Total · ${shown.length} ${unit}${shown.length === 1 ? "" : "s"}</td><td class="num muted">${kg(t.projFull)}</td><td class="num">${kg(t.proj)}</td><td class="num">${kg(t.so)}</td>${view === "item" ? `<td class="num muted">${kg(t.soDis + t.soPen)}</td>` : ""}<td class="num">${signed(t.gap)}</td><td class="num">${ratio(t.proj, t.so)}</td><td></td></tr></tfoot>
   </table></div>`;
 }
 
