@@ -105,10 +105,13 @@ function sMismatch(base, pct) {
 const OVER = "FF1D4F91", UNDER = "FFC0392F", FLAT = "FF6B7186";
 const GAP_RGB = (d) => (d > 0.0005 ? OVER : d < -0.0005 ? UNDER : FLAT);
 const RATIO_RGB = (r) => (r == null || !Number.isFinite(r) ? FLAT : r > 1.05 ? OVER : r < 0.95 ? UNDER : "FF15803D");
+// Plain ASCII on purpose: a formula Excel cannot parse makes it discard the
+// whole sheet ("Replaced Part … Load error"), and the status formula is the
+// verdict formula the row-level sheet already uses.
 const STATUS = {
-  over: { text: "▲ Over", fill: "FFE8EFF9", font: OVER },
-  under: { text: "▼ Under", fill: "FFFDECEA", font: UNDER },
-  match: { text: "● Match", fill: "FFE8F5EE", font: "FF1F7D53" },
+  over: { text: "Over-projected", fill: "FFE8EFF9", font: OVER },
+  under: { text: "Under-projected", fill: "FFFDECEA", font: UNDER },
+  match: { text: "On target", fill: "FFE8F5EE", font: "FF1F7D53" },
 };
 const sStatus = (base, cls) => ({ ...base, fill: { fgColor: { rgb: STATUS[cls].fill } }, font: { color: { rgb: STATUS[cls].font }, bold: true }, alignment: { horizontal: "center" } });
 
@@ -133,12 +136,21 @@ function node(n, children, code) {
 const unsafe = (s) => /[*?~]|^[<>=]/.test(s);
 const esc = (s) => '"=' + s.replace(/[~*?]/g, "~$&").replace(/"/g, '""') + '"';
 
+/* SUM of explicit cell references. Excel allows 255 arguments per function,
+ * so a parent with more children sums them in nested chunks of 250. */
+function sumOf(refs) {
+  if (refs.length <= 250) return `SUM(${refs.join(",")})`;
+  const parts = [];
+  for (let i = 0; i < refs.length; i += 250) parts.push(`SUM(${refs.slice(i, i + 250).join(",")})`);
+  return `SUM(${parts.join(",")})`;
+}
+
 function pivotSheet(roots, levels, lastRow) {
   const col = (i) => XLSX.utils.encode_col(i);
   const q = (c) => `'${DATA_SHEET}'!$${c}$2:$${c}$${lastRow}`;
   const N_L = levels.length;
   const cCode = col(N_L), cLevel = col(N_L + 1), cMo = col(N_L + 2), cMtd = col(N_L + 3), cSo = col(N_L + 4),
-    cDis = col(N_L + 5), cGap = col(N_L + 6);
+    cDis = col(N_L + 5);
 
   const grid = [[...levels.map((l) => l.label), "Item Code", "Level", "Month Proj kgs", "MTD Proj kgs", "SO kgs",
     `${CAT_A} Disp kgs`, "Gap kgs", "SO / Proj %", "Proj / SO %", "Proj vs SO %", "Mismatch %", "Status"].map((h) => T(h, S_HEAD))];
@@ -147,14 +159,14 @@ function pivotSheet(roots, levels, lastRow) {
   const derived = (R, a, base) => {
     const gap = a.mtd - a.so;
     const den = Math.max(a.so, a.mtd);
-    const cls = classify(gap);
+    const cls = a.mtd > a.so ? "over" : a.mtd < a.so ? "under" : "match";   // as the formula decides
     return [
       F(`${cMtd}${R}-${cSo}${R}`, KG_Z, gap, sTint(base, GAP_RGB(gap))),
       F(`IF(${cMtd}${R}=0,"",${cSo}${R}/${cMtd}${R})`, PCT_Z, a.mtd > 0 ? a.so / a.mtd : null, sTint(base, RATIO_RGB(a.so > 0 ? a.mtd / a.so : null))),
       F(`IF(${cSo}${R}=0,"",${cMtd}${R}/${cSo}${R})`, PCT_Z, a.so > 0 ? a.mtd / a.so : null, sTint(base, RATIO_RGB(a.so > 0 ? a.mtd / a.so : null))),
       F(`IF(${cSo}${R}=0,"",(${cMtd}${R}-${cSo}${R})/${cSo}${R})`, PCT_Z, a.so > 0 ? gap / a.so : null, sTint(base, GAP_RGB(gap))),
       F(`IF(MAX(${cSo}${R},${cMtd}${R})=0,0,ABS(${cMtd}${R}-${cSo}${R})/MAX(${cSo}${R},${cMtd}${R}))`, PCT_Z, den > 0 ? Math.abs(gap) / den : 0, sMismatch(base, den > 0 ? Math.abs(gap) / den : 0)),
-      F(`IF(${cGap}${R}>0.0005,"${STATUS.over.text}",IF(${cGap}${R}<-0.0005,"${STATUS.under.text}","${STATUS.match.text}"))`, null, STATUS[cls].text, sStatus(base, cls)),
+      F(`IF(${cMtd}${R}>${cSo}${R},"${STATUS.over.text}",IF(${cMtd}${R}<${cSo}${R},"${STATUS.under.text}","${STATUS.match.text}"))`, null, STATUS[cls].text, sStatus(base, cls)),
     ];
   };
 
@@ -170,12 +182,12 @@ function pivotSheet(roots, levels, lastRow) {
 
     const childRows = n.children.map((c) => emit(c, depth + 1, pth, itemCode));
     const isLeaf = !n.children.length;
-    const sum = (c) => childRows.map((r) => `${c}${r}`).join(",");
+    const sum = (c) => sumOf(childRows.map((r) => `${c}${r}`));
     const crit = [
       ...pth.map((v, i) => `${q(DC[levels[i].key])},${unsafe(v) ? esc(v) : `$${col(i)}${myRow}`}`),
       ...(itemCode ? [`${q(DC.item_code)},${unsafe(itemCode) ? esc(itemCode) : `$${cCode}${myRow}`}`] : []),
     ].join(",");
-    const agg = (c, field, val) => (isLeaf ? F(`SUMIFS(${q(DC[field])},${crit})`, KG_Z, val, base) : F(`SUM(${sum(c)})`, KG_Z, val, base));
+    const agg = (c, field, val) => (isLeaf ? F(`SUMIFS(${q(DC[field])},${crit})`, KG_Z, val, base) : F(sum(c), KG_Z, val, base));
 
     placeholder.push(
       ...levels.map((l, i) => T(i < pth.length ? pth[i] : "", base)),
@@ -194,12 +206,12 @@ function pivotSheet(roots, levels, lastRow) {
   // Grand total over the root rows only, so nothing is counted twice.
   if (rootRows.length) {
     const t = roots.reduce((s, n) => ({ month: s.month + n.month, mtd: s.mtd + n.mtd, so: s.so + n.so, dis: s.dis + n.dis }), { month: 0, mtd: 0, so: 0, dis: 0 });
-    const rs = (c) => rootRows.map((r) => `${c}${r}`).join(",");
+    const rs = (c) => sumOf(rootRows.map((r) => `${c}${r}`));
     const TR = R;
     grid.push([
       T("TOTAL", S_TOTAL), ...levels.slice(1).map(() => T("", S_TOTAL)), T("", S_TOTAL), T("Total", S_TOTAL),
-      F(`SUM(${rs(cMo)})`, KG_Z, t.month, S_TOTAL), F(`SUM(${rs(cMtd)})`, KG_Z, t.mtd, S_TOTAL),
-      F(`SUM(${rs(cSo)})`, KG_Z, t.so, S_TOTAL), F(`SUM(${rs(cDis)})`, KG_Z, t.dis, S_TOTAL),
+      F(rs(cMo), KG_Z, t.month, S_TOTAL), F(rs(cMtd), KG_Z, t.mtd, S_TOTAL),
+      F(rs(cSo), KG_Z, t.so, S_TOTAL), F(rs(cDis), KG_Z, t.dis, S_TOTAL),
       ...derived(TR, t, S_TOTAL),
     ]);
     meta.push({});

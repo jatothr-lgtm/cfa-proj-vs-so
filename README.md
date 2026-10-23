@@ -125,7 +125,14 @@ SO / Proj % · Proj / SO % · Proj vs SO % · Mismatch % · Status.
 
 **Colours.** Indigo header, one tint per outline depth, bold total row,
 red → amber → green on Mismatch %, as in the reference. Over / under keep the
-dashboard's blue / red (gap, ratios and the ▲ Over / ▼ Under status).
+dashboard's blue / red (gap, ratios and the Over-projected / Under-projected
+status).
+
+**Excel-safe formulas.** Excel discards a whole sheet ("Replaced Part … XML
+error. Load error") when one formula fails to parse — LibreOffice does not, so a
+file can look fine there and empty in Excel. Every formula therefore uses only
+constructs the reference's workbook already uses (SUMIFS, SUM, IF, MAX, ABS),
+plain ASCII text, and at most 250 arguments per SUM (larger parents nest).
 
 ## Files
 
