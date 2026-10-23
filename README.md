@@ -106,33 +106,27 @@ same library that reads the input).
 
 | Tab | Contents |
 |---|---|
-| `All Conditions Applied` | Row-level data after every rule and filter — the only tab with literal numbers. Filters applied, **SO days / days in month**, the MTD formula and the rows left out sit to its right |
+| `All Conditions Applied` | Row-level data after every rule and filter, with in-row gap and verdict formulas. Filters applied, **SO days / days in month**, the MTD formula and the rows left out sit to its right |
 | `Customer Pivot` | Customer Group → Customer → Item Group → Item Parent → Item Name |
 | `Item Pivot` | Item Group → Item Parent → Item Name → Customer Group → Customer |
 | `Over-Projected` | Item Group → Item Parent → Item Name where MTD proj > SO, worst first |
 | `Under-Projected` | Item Group → Item Parent → Item Name where SO > MTD proj, worst first |
 
-**Live formulas.** Pivot leaves are `SUMIFS` on the data tab, parents `SUM` their
-direct children, ratios are arithmetic on the row — edit a kg on the data tab and
-the workbook recalculates. Every formula is written with its cached result, so
-the file shows numbers before Excel recalculates.
-
-**Click-to-expand.** Pivot rows use Excel's outline: each expandable row has a
-`+` in the left margin and its children start collapsed.
+**Pivots are values, the data tab keeps its formulas.** Desktop Excel discarded
+every sheet that used row outline grouping ("Replaced Part … XML error. Load
+error"), from this writer and from ExcelJS alike, while the row-level tab — which
+has none — always opened. The pivot tabs therefore use only what that tab proves
+Excel reads: styled text and numbers and a filter row. The hierarchy reads from
+the repeated level columns, the `Level` column (L1 … Detail) and one tint per
+depth; filter `Level` to collapse a tab to a level.
 
 **Columns.** Month Proj · MTD Proj · SO · Category A Disp · Gap (MTD − SO) ·
 SO / Proj % · Proj / SO % · Proj vs SO % · Mismatch % · Status.
 
-**Colours.** Indigo header, one tint per outline depth, bold total row,
-red → amber → green on Mismatch %, as in the reference. Over / under keep the
-dashboard's blue / red (gap, ratios and the Over-projected / Under-projected
-status).
-
-**Excel-safe formulas.** Excel discards a whole sheet ("Replaced Part … XML
-error. Load error") when one formula fails to parse — LibreOffice does not, so a
-file can look fine there and empty in Excel. Every formula therefore uses only
-constructs the reference's workbook already uses (SUMIFS, SUM, IF, MAX, ABS),
-plain ASCII text, and at most 250 arguments per SUM (larger parents nest).
+**Colours.** Indigo header, one tint per depth, bold total row,
+red → amber → green on Mismatch %, as in the reference. Over / under in the
+dashboard's blue / red: gap, ratios and Status (Over-projected /
+Under-projected / On target).
 
 ## Files
 

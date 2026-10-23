@@ -1,10 +1,9 @@
 /* Projection vs SO — the Excel export.
  *
- * Same format as projection-analytics-dashboard:
+ * Tabs as in projection-analytics-dashboard:
  *
- *   All Conditions Applied  row-level data — the only sheet with literal
- *                           numbers; filters, SO days and rows left out sit
- *                           to the right of it (columns after a gap)
+ *   All Conditions Applied  row-level data; filters, SO days and rows left
+ *                           out sit to the right of it (after a gap column)
  *   Customer Pivot          Customer Group › Customer › Item Group ›
  *                           Item Parent › Item Name
  *   Item Pivot              Item Group › Item Parent › Item Name ›
@@ -12,16 +11,19 @@
  *   Over-Projected          Item Group › Item Parent › Item Name, MTD proj > SO
  *   Under-Projected         Item Group › Item Parent › Item Name, SO > MTD proj
  *
- * Written with xlsx-js-style (SheetJS 0.18.5 plus cell styles), as LIVE
- * FORMULAS: pivot leaves are SUMIFS on the data sheet, parents SUM their
- * direct children, every ratio is arithmetic on the row. Each formula carries
- * its cached result — without one the writer drops the cell and Excel shows a
- * blank grid until it recalculates. Pivot rows use Excel's outline: children
- * start collapsed under a + button.
+ * Written with xlsx-js-style (SheetJS 0.18.5 plus cell styles).
  *
- * Colours: indigo header, one tint per outline depth, bold total row,
- * red → amber → green on Mismatch %, as in the reference; over / under keep
- * the dashboard's blue / red so the two read the same.
+ * Why the pivots are plain values: desktop Excel discarded every sheet that
+ * used row outline grouping ("Replaced Part … XML error. Load error") — both
+ * from this writer and from ExcelJS — while the row-level sheet, which has
+ * none, always opened. So the pivots carry only what that sheet proves Excel
+ * reads: styled text and numbers and a filter row. Hierarchy reads from the
+ * repeated level columns, the Level column and the depth tints; filter Level
+ * to collapse. The row-level sheet keeps its in-row formulas.
+ *
+ * Colours: indigo header, one tint per depth, bold total row, red → amber →
+ * green on Mismatch % as in the reference; over / under in the dashboard's
+ * blue / red (gap, ratios, Status).
  */
 
 import { CAT_A, TAB_LABEL, leaves, tree, classify, ymLabel, rowLabeler } from "./calc.js";
@@ -61,16 +63,12 @@ function buildSheet(grid) {
   return ws;
 }
 
-function addSheet(wb, name, grid, widths, rowMeta) {
+function addSheet(wb, name, grid, widths) {
   const ws = buildSheet(grid);
   const nCols = (grid[0] || []).length;
   ws["!cols"] = widths;
   if (grid.length > 1) {
     ws["!autofilter"] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: grid.length - 1, c: Math.max(0, nCols - 1) } }) };
-  }
-  if (rowMeta) {
-    ws["!rows"] = rowMeta;
-    ws["!outline"] = { above: true };   // the summary row sits above its detail
   }
   XLSX.utils.book_append_sheet(wb, ws, name.slice(0, 31));
   return ws;
@@ -131,92 +129,55 @@ function node(n, children, code) {
   return { label: n.label, code: code || n.leaf?.code || "", month: n.projFull, mtd: n.proj, so: n.so, dis: n.soDis, children };
 }
 
-/* A label is used as a SUMIFS criterion by cell reference; one that Excel
- * would read as a wildcard or comparison is passed as an escaped literal. */
-const unsafe = (s) => /[*?~]|^[<>=]/.test(s);
-const esc = (s) => '"=' + s.replace(/[~*?]/g, "~$&").replace(/"/g, '""') + '"';
-
-/* SUM of explicit cell references. Excel allows 255 arguments per function,
- * so a parent with more children sums them in nested chunks of 250. */
-function sumOf(refs) {
-  if (refs.length <= 250) return `SUM(${refs.join(",")})`;
-  const parts = [];
-  for (let i = 0; i < refs.length; i += 250) parts.push(`SUM(${refs.slice(i, i + 250).join(",")})`);
-  return `SUM(${parts.join(",")})`;
-}
-
-function pivotSheet(roots, levels, lastRow) {
-  const col = (i) => XLSX.utils.encode_col(i);
-  const q = (c) => `'${DATA_SHEET}'!$${c}$2:$${c}$${lastRow}`;
-  const N_L = levels.length;
-  const cCode = col(N_L), cLevel = col(N_L + 1), cMo = col(N_L + 2), cMtd = col(N_L + 3), cSo = col(N_L + 4),
-    cDis = col(N_L + 5);
-
+/* A PIVOT sheet, written as values. One column per level with the ancestors
+ * repeated, a Level column (L1 … Detail) and every parent directly above its
+ * children, as in the reference — but no Excel outline grouping and no
+ * cross-sheet formulas: the pivot sheets use only what the row-level sheet
+ * already proves Excel opens (styled text and numbers, a filter row).
+ * Filter the Level column to collapse a sheet to a level. */
+function pivotSheet(roots, levels) {
   const grid = [[...levels.map((l) => l.label), "Item Code", "Level", "Month Proj kgs", "MTD Proj kgs", "SO kgs",
     `${CAT_A} Disp kgs`, "Gap kgs", "SO / Proj %", "Proj / SO %", "Proj vs SO %", "Mismatch %", "Status"].map((h) => T(h, S_HEAD))];
-  const meta = [{}];
 
-  const derived = (R, a, base) => {
+  const pct = (v, s) => (v == null || !Number.isFinite(v) ? T("", s) : N(v, PCT_Z, s));
+  const numbers = (a, base) => {
     const gap = a.mtd - a.so;
     const den = Math.max(a.so, a.mtd);
-    const cls = a.mtd > a.so ? "over" : a.mtd < a.so ? "under" : "match";   // as the formula decides
+    const projOverSo = a.so > 0 ? a.mtd / a.so : null;
+    const cls = classify(gap);
     return [
-      F(`${cMtd}${R}-${cSo}${R}`, KG_Z, gap, sTint(base, GAP_RGB(gap))),
-      F(`IF(${cMtd}${R}=0,"",${cSo}${R}/${cMtd}${R})`, PCT_Z, a.mtd > 0 ? a.so / a.mtd : null, sTint(base, RATIO_RGB(a.so > 0 ? a.mtd / a.so : null))),
-      F(`IF(${cSo}${R}=0,"",${cMtd}${R}/${cSo}${R})`, PCT_Z, a.so > 0 ? a.mtd / a.so : null, sTint(base, RATIO_RGB(a.so > 0 ? a.mtd / a.so : null))),
-      F(`IF(${cSo}${R}=0,"",(${cMtd}${R}-${cSo}${R})/${cSo}${R})`, PCT_Z, a.so > 0 ? gap / a.so : null, sTint(base, GAP_RGB(gap))),
-      F(`IF(MAX(${cSo}${R},${cMtd}${R})=0,0,ABS(${cMtd}${R}-${cSo}${R})/MAX(${cSo}${R},${cMtd}${R}))`, PCT_Z, den > 0 ? Math.abs(gap) / den : 0, sMismatch(base, den > 0 ? Math.abs(gap) / den : 0)),
-      F(`IF(${cMtd}${R}>${cSo}${R},"${STATUS.over.text}",IF(${cMtd}${R}<${cSo}${R},"${STATUS.under.text}","${STATUS.match.text}"))`, null, STATUS[cls].text, sStatus(base, cls)),
+      N(a.month, KG_Z, sTint(base, "FF8B9992")),
+      N(a.mtd, KG_Z, base),
+      N(a.so, KG_Z, base),
+      N(a.dis, KG_Z, sTint(base, "FF8B9992")),
+      N(gap, KG_Z, sTint(base, GAP_RGB(gap), true)),
+      pct(a.mtd > 0 ? a.so / a.mtd : null, sTint(base, RATIO_RGB(projOverSo))),
+      pct(projOverSo, sTint(base, RATIO_RGB(projOverSo))),
+      pct(a.so > 0 ? gap / a.so : null, sTint(base, GAP_RGB(gap))),
+      N(den > 0 ? Math.abs(gap) / den : 0, PCT_Z, sMismatch(base, den > 0 ? Math.abs(gap) / den : 0)),
+      T(STATUS[cls].text, sStatus(base, cls)),
     ];
   };
 
-  let R = 2;
   function emit(n, depth, path, code) {
     const base = sDepth(depth, n.children.length > 0);
-    const myRow = R++;
     const pth = [...path, n.label];
     const itemCode = n.code || code;
-    const placeholder = [];
-    grid.push(placeholder);
-    meta.push(depth ? { level: depth, hidden: true } : {});
-
-    const childRows = n.children.map((c) => emit(c, depth + 1, pth, itemCode));
-    const isLeaf = !n.children.length;
-    const sum = (c) => sumOf(childRows.map((r) => `${c}${r}`));
-    const crit = [
-      ...pth.map((v, i) => `${q(DC[levels[i].key])},${unsafe(v) ? esc(v) : `$${col(i)}${myRow}`}`),
-      ...(itemCode ? [`${q(DC.item_code)},${unsafe(itemCode) ? esc(itemCode) : `$${cCode}${myRow}`}`] : []),
-    ].join(",");
-    const agg = (c, field, val) => (isLeaf ? F(`SUMIFS(${q(DC[field])},${crit})`, KG_Z, val, base) : F(sum(c), KG_Z, val, base));
-
-    placeholder.push(
+    grid.push([
       ...levels.map((l, i) => T(i < pth.length ? pth[i] : "", base)),
       T(itemCode, sTint(base, "FF8B9992", false)),
-      T(isLeaf ? "Detail" : `L${depth + 1}`, base),
-      agg(cMo, "month_proj_kgs", n.month),
-      agg(cMtd, "mtd_proj_kgs", n.mtd),
-      agg(cSo, "so_kgs", n.so),
-      agg(cDis, "cat_a_dispatch_kgs", n.dis),
-      ...derived(myRow, n, base),
-    );
-    return myRow;
-  }
-  const rootRows = roots.map((n) => emit(n, 0, [], ""));
-
-  // Grand total over the root rows only, so nothing is counted twice.
-  if (rootRows.length) {
-    const t = roots.reduce((s, n) => ({ month: s.month + n.month, mtd: s.mtd + n.mtd, so: s.so + n.so, dis: s.dis + n.dis }), { month: 0, mtd: 0, so: 0, dis: 0 });
-    const rs = (c) => sumOf(rootRows.map((r) => `${c}${r}`));
-    const TR = R;
-    grid.push([
-      T("TOTAL", S_TOTAL), ...levels.slice(1).map(() => T("", S_TOTAL)), T("", S_TOTAL), T("Total", S_TOTAL),
-      F(rs(cMo), KG_Z, t.month, S_TOTAL), F(rs(cMtd), KG_Z, t.mtd, S_TOTAL),
-      F(rs(cSo), KG_Z, t.so, S_TOTAL), F(rs(cDis), KG_Z, t.dis, S_TOTAL),
-      ...derived(TR, t, S_TOTAL),
+      T(n.children.length ? `L${depth + 1}` : "Detail", base),
+      ...numbers(n, base),
     ]);
-    meta.push({});
+    n.children.forEach((c) => emit(c, depth + 1, pth, itemCode));
   }
-  return { grid, meta };
+  roots.forEach((n) => emit(n, 0, [], ""));
+
+  if (roots.length) {
+    const t = roots.reduce((s, n) => ({ month: s.month + n.month, mtd: s.mtd + n.mtd, so: s.so + n.so, dis: s.dis + n.dis }), { month: 0, mtd: 0, so: 0, dis: 0 });
+    grid.push([T("TOTAL", S_TOTAL), ...levels.slice(1).map(() => T("", S_TOTAL)), T("", S_TOTAL), T("Total", S_TOTAL), ...numbers(t, S_TOTAL)]);
+  }
+  return grid;
 }
 
 /* ── the workbook ────────────────────────────────────────────────── */
@@ -227,7 +188,6 @@ export function exportWorkbook({ prepared, wh, sort = "gap" }) {
   const wb = XLSX.utils.book_new();
   const label = rowLabeler(prepared, wh);
   const rows = wh ? prepared.rows.filter((r) => r.wh === wh) : prepared.rows;
-  const lastRow = Math.max(2, rows.length + 1);
   const pr = prepared.prorate;
 
   /* 1. Row-level data. */
@@ -313,9 +273,9 @@ export function exportWorkbook({ prepared, wh, sort = "gap" }) {
   const wch = { customer_group: 18, customer: 30, item_group: 24, item_parent: 30, item_name: 46 };
   for (const [name, lv, roots] of P) {
     const levels = lv.map(([key, lab]) => ({ key, label: lab }));
-    const { grid, meta } = pivotSheet(roots, levels, lastRow);
+    const grid = pivotSheet(roots, levels);
     addSheet(wb, name, grid, [...levels.map((l) => ({ wch: wch[l.key] })), { wch: 18 }, { wch: 8 },
-      { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 13 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 11 }, { wch: 10 }], meta);
+      { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 13 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 11 }, { wch: 16 }]);
   }
 
   const tag = [prepared.projPeriods[0] || "", wh || "all"].filter(Boolean).join("-");
