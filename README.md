@@ -99,21 +99,24 @@ adds a **Customer x Item** sheet with every customer-item pair.
 
 ## The Excel export
 
-Styled like the dashboard (ExcelJS, loaded on the first export):
+Three tabs, styled like the dashboard (ExcelJS, loaded on the first export):
 
-| Sheet | What it holds |
+| Tab | What it holds |
 |---|---|
 | Summary | Period, **SO days / days in month**, the six tiles, how it is built, rows left out |
-| Customer - All / Over / Under | Customer Group › Customer › Item Group › Item Parent › Item Name |
-| Item - All / Over / Under | Item Group › Item Parent › Item Name |
-| Customer x Item | One flat row per customer-item pair, with filters |
+| Customer | Customer Group › Customer › Item Group › Item Parent › Item Name |
+| Item | Item Group › Item Parent › Item Name |
 
 The breakdowns are Excel **outline levels** — the 1–5 buttons at the top left
-collapse or open a level, the same as the dashboard's arrows. Over is blue and
-under red (gap figures and the ▲ Over / ▼ Under tags), top-level groups are
-shaded, Month projection is grey, header row and first column are frozen, and
-the Over / Under sheet tabs are blue / red. Numbers use `#,##0`, which follows
-the reader's digit grouping (1,33,861 on an Indian locale).
+collapse or open a level, the same as the dashboard's arrows. Over / Under is the
+**Status** column (▲ Over blue, ▼ Under red, on every customer and item) with a
+filter dropdown on the header, rather than separate tabs. Gap figures carry the
+same colours, top-level groups are shaded, Month projection is grey, the header
+row and first column are frozen. Numbers use `#,##0`, which follows the reader's
+digit grouping (1,33,861 on an Indian locale).
+
+The workbook declares its window (`wb.views`): without one, desktop Excel can
+open the file to a blank grey window although every sheet holds data.
 
 ## Files
 

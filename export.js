@@ -3,13 +3,12 @@
  * ExcelJS (loaded on first export) rather than SheetJS, because the
  * community SheetJS build cannot write fills, fonts or outline levels.
  *
- *   Summary            period, SO days, the tiles, the rules, rows left out
- *   Customer - All / Over / Under
- *                      Customer Group › Customer › Item Group › Item Parent ›
- *                      Item Name, as Excel outline levels (the +/− buttons)
- *   Item - All / Over / Under
- *                      Item Group › Item Parent › Item Name
- *   Customer x Item    one flat row per customer-item pair, filterable
+ * Three tabs:
+ *   Summary   period, SO days, the tiles, the rules, rows left out
+ *   Customer  Customer Group › Customer › Item Group › Item Parent › Item Name
+ *   Item      Item Group › Item Parent › Item Name
+ * The breakdowns are Excel outline levels (the 1–5 buttons). Over / Under is
+ * the colour-coded Status column, filterable, rather than tabs of its own.
  *
  * Colours match the dashboard: over is blue, under is red, group rows shaded.
  */
@@ -52,7 +51,6 @@ const STATUS = {
   under: { text: "▼ Under", font: C.under, bg: C.underBg },
   match: { text: "● Match", font: C.match, bg: C.matchBg },
 };
-const STATUS_LONG = { over: "Over-projected", under: "Under-projected", match: "Match" };
 
 function header(ws, cols) {
   ws.columns = cols.map((c) => ({ header: c.h, key: c.k, width: c.w }));
@@ -179,41 +177,6 @@ function itemSheet(wb, name, itemLeaves, mode, sort) {
   return ws;
 }
 
-function flatSheet(wb, custLeaves) {
-  const ws = wb.addWorksheet("Customer x Item");
-  const cols = [
-    { h: "Customer Group", k: "cg", w: 18 }, { h: "Customer", k: "c", w: 34 },
-    { h: "Item Group", k: "ig", w: 24 }, { h: "Item Parent", k: "ip", w: 30 }, { h: "Item Name", k: "in", w: 52 },
-    { h: "Item Code", k: "code", w: 18 },
-    { h: "Month proj kg", k: "month", w: 14, num: true, fmt: KG },
-    { h: "MTD proj kg", k: "mtd", w: 14, num: true, fmt: KG },
-    { h: "SO kg", k: "so", w: 14, num: true, fmt: KG },
-    { h: "SO from so tab kg", k: "sot", w: 14, num: true, fmt: KG },
-    { h: `SO from ${CAT_A} dispatches kg`, k: "dis", w: 16, num: true, fmt: KG },
-    { h: "Gap kg (MTD − SO)", k: "gap", w: 15, num: true, fmt: GAP },
-    { h: "MTD ÷ SO", k: "ratio", w: 10, num: true, fmt: PCT },
-    { h: "Status", k: "status", w: 16 },
-  ];
-  header(ws, cols);
-  ws.views = [{ state: "frozen", ySplit: 1, xSplit: 2 }];
-  const by = (a, b) => a.path.join("|").localeCompare(b.path.join("|"));
-  for (const l of [...custLeaves].sort(by)) {
-    for (const it of [...l.items].sort(by)) {
-      const cls = classify(it.gap);
-      const row = ws.addRow([...l.path, ...it.path, it.code, it.projFull, it.proj, it.so, it.soTab, it.soDis, it.gap, ratio(it.proj, it.so), STATUS_LONG[cls]]);
-      cols.forEach((c, i) => {
-        const cell = row.getCell(i + 1);
-        cell.border = { bottom: hair };
-        if (c.fmt) cell.numFmt = c.fmt;
-        if (c.k === "gap") cell.font = { color: { argb: cls === "over" ? C.over : cls === "under" ? C.under : C.ink2 } };
-        if (c.k === "status") { cell.font = { color: { argb: STATUS[cls].font }, bold: true }; cell.fill = fill(STATUS[cls].bg); }
-        if (c.k === "month" || c.k === "code") cell.font = { color: { argb: C.ink3 } };
-      });
-    }
-  }
-  ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: cols.length } };
-}
-
 /* ── summary ─────────────────────────────────────────────────────── */
 
 function summarySheet(wb, prepared, custLeaves, whLabel) {
@@ -223,10 +186,10 @@ function summarySheet(wb, prepared, custLeaves, whLabel) {
   const period = prepared.projPeriods.map(ymLabel).join(", ") || "—";
 
   const title = ws.addRow(["Projection vs SO"]);
-  title.font = { bold: true, size: 16, color: { argb: C.ink } };
+  title.font = { name: FONT, bold: true, size: 16, color: { argb: C.ink } };
   title.height = 26;
   const sub = ws.addRow([`${period} · ${whLabel} · exported ${new Date().toLocaleString("en-IN")}`]);
-  sub.font = { color: { argb: C.ink2 } };
+  sub.font = { name: FONT, color: { argb: C.ink2 } };
   ws.addRow([]);
 
   // Period in short, as on the dashboard header.
@@ -268,13 +231,13 @@ function summarySheet(wb, prepared, custLeaves, whLabel) {
     ["Month projection", "projection › Total KGs"],
     ["MTD projection", "Month projection ÷ days in month × unique Sales Order Dates in the so tab"],
     ["SO", `so › Stock Qty in KGS (Customer Group ≠ ${CAT_A}) + dispatches › Stock Qty In Kg (Sales Channel = ${CAT_A}, Invoice Status ≠ Return)`],
-    ["Over / Under", "per customer (Customer sheets) or per item (Item sheets): MTD proj > SO is over, < SO is under"],
+    ["Over / Under", "Status column — per customer and per item: MTD proj > SO is ▲ Over (blue), < SO is ▼ Under (red). Filter it from the header."],
     ["Month filter", prepared.filterMonth ? period : "off — tabs compared as loaded"],
-    ["Outline", "Use the 1–5 buttons at the top left of the Customer and Item sheets to collapse or open levels"],
+    ["Outline", "Use the 1–5 buttons at the top left of the Customer and Item tabs to collapse or open levels"],
   ];
   rules.forEach(([a, b], i) => {
     const r = ws.addRow([a, b]);
-    if (!i) { r.font = { bold: true, size: 12 }; return; }
+    if (!i) { r.font = { name: FONT, bold: true, size: 12 }; return; }
     r.getCell(1).font = { bold: true, color: { argb: C.ink2 } };
     r.getCell(1).alignment = { vertical: "top" };
     ws.mergeCells(r.number, 2, r.number, 4);
@@ -307,18 +270,15 @@ export async function exportWorkbook({ prepared, wh, sort = "gap" }) {
   const cust = leaves(prepared, "customer", wh);
   const items = leaves(prepared, "item", wh);
   const whLabel = wh ? `CFA (${wh})` : "All CFAs";
-  const pick = (ls, mode) => (mode === "all" ? ls : ls.filter((l) => classify(l.gap) === mode));
 
   summarySheet(wb, prepared, cust, whLabel);
-  for (const [mode, label] of [["all", "All"], ["over", "Over"], ["under", "Under"]]) {
-    customerSheet(wb, `Customer - ${label}`, pick(cust, mode), mode, sort);
-  }
-  for (const [mode, label] of [["all", "All"], ["over", "Over"], ["under", "Under"]]) {
-    itemSheet(wb, `Item - ${label}`, pick(items, mode), mode, sort);
-  }
-  flatSheet(wb, cust);
+  customerSheet(wb, "Customer", cust, "all", sort);
+  itemSheet(wb, "Item", items, "all", sort);
 
-  // Tab colours: over sheets blue, under sheets red, like the dashboard.
+  // Without a workbook window (<bookViews>) Excel can open the file with no
+  // visible sheet at all — a blank grey window, though the data is there.
+  wb.views = [{ x: 0, y: 0, width: 28800, height: 16000, firstSheet: 0, activeTab: 1, visibility: "visible" }];
+
   // One typeface everywhere: a font set for colour or weight alone would
   // otherwise drop back to the application default. Print landscape, one
   // page wide.
@@ -327,10 +287,13 @@ export async function exportWorkbook({ prepared, wh, sort = "gap" }) {
       cell.font = { name: FONT, size: 10, ...(cell.font || {}) };
     }));
     ws.pageSetup = { orientation: "landscape", fitToPage: true, fitToWidth: 1, fitToHeight: 0, margins: { left: 0.4, right: 0.4, top: 0.5, bottom: 0.5, header: 0.2, footer: 0.2 } };
-    if (ws.name !== "Summary") ws.pageSetup.printTitlesRow = "1:1";
-    if (/Over$/.test(ws.name)) ws.properties.tabColor = { argb: C.over };
-    else if (/Under$/.test(ws.name)) ws.properties.tabColor = { argb: C.under };
-    else if (ws.name === "Summary") ws.properties.tabColor = { argb: C.brand };
+    if (ws.name === "Summary") ws.properties.tabColor = { argb: C.brand };
+    else {
+      ws.pageSetup.printTitlesRow = "1:1";
+      // Filter buttons on the header, e.g. Status = ▼ Under.
+      // The range spans the data (not the Total row), so the dropdowns filter it.
+      ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: ws.rowCount - 1, column: ws.columnCount } };
+    }
   });
 
   const buf = await wb.xlsx.writeBuffer();
