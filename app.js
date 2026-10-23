@@ -3,9 +3,9 @@
 import {
   TABS, TAB_LABEL, DEFAULT_WAREHOUSES, CAT_A,
   classifySheet, parseNormalisation, extractTab, prepare, leaves, tree, classify, ymLabel,
-} from "./calc.js?v=9";
-import { groupBars, gapBars } from "./charts.js?v=9";
-import { exportWorkbook } from "./export.js?v=9";
+} from "./calc.js?v=10";
+import { groupBars, gapBars } from "./charts.js?v=10";
+import { exportWorkbook } from "./export.js?v=10";
 
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
