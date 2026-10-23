@@ -26,7 +26,7 @@
  * blue / red (gap, ratios, Status).
  */
 
-import { CAT_A, TAB_LABEL, leaves, tree, classify, ymLabel, rowLabeler } from "./calc.js";
+import { CAT_A, TAB_LABEL, leaves, tree, classify, ymLabel, rowLabeler } from "./calc.js?v=9";
 
 const DATA_SHEET = "All Conditions Applied";
 const PCT_Z = "0.0%", KG_Z = "#,##0.00", INT_Z = "#,##0";
