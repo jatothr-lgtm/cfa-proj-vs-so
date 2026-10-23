@@ -315,6 +315,7 @@ export function prepare(tabs, warehouses, { matchMonth = true, prorate = true } 
         name: r.name,
         qty: tab === "projection" ? r.qty * pr.factor : r.qty,
         fullQty: r.qty,
+        period: r.period,   // carried for the export's target_month column only
       });
     }
   }

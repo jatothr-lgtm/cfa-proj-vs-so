@@ -106,19 +106,21 @@ same library that reads the input).
 
 | Tab | Contents |
 |---|---|
-| `All Conditions Applied` | Row-level data after every rule and filter, with in-row gap and verdict formulas. Filters applied, **SO days / days in month**, the MTD formula and the rows left out sit to its right |
+| `All Conditions Applied` | Row-level data (target_month, CFA, labels, row type, month / MTD proj, SO, Category A dispatch) with per-row `diff_kgs`, `%` and `verdict` formulas. A **FILTERS APPLIED** block sits after one blank column: Target Month, CFA, the other filters, **SO days / days in month**, the MTD formula, rows after filters / in source, then the rows left out |
 | `Customer Pivot` | Customer Group → Customer → Item Group → Item Parent → Item Name |
 | `Item Pivot` | Item Group → Item Parent → Item Name → Customer Group → Customer |
 | `Over-Projected` | Item Group → Item Parent → Item Name where MTD proj > SO, worst first |
 | `Under-Projected` | Item Group → Item Parent → Item Name where SO > MTD proj, worst first |
 
-**Pivots are values, the data tab keeps its formulas.** Desktop Excel discarded
-every sheet that used row outline grouping ("Replaced Part … XML error. Load
-error"), from this writer and from ExcelJS alike, while the row-level tab — which
-has none — always opened. The pivot tabs therefore use only what that tab proves
-Excel reads: styled text and numbers and a filter row. The hierarchy reads from
-the repeated level columns, the `Level` column (L1 … Detail) and one tint per
-depth; filter `Level` to collapse a tab to a level.
+**Same layout and filters as the reference workbook.** Label columns, then
+`Level` (L1 … Detail), then the figures; every expandable row has a `+` in the
+left margin with its children collapsed (summary row above); an autofilter
+spans each tab's full range.
+
+**Live formulas.** Pivot leaves are `SUMIFS` on the data tab (the item code is a
+literal criterion), parents `SUM` their direct children, ratios are arithmetic
+on the row; each formula carries its cached result. Formulas are plain ASCII and
+no `SUM` takes more than 250 arguments (larger parents nest).
 
 **Columns.** Month Proj · MTD Proj · SO · Category A Disp · Gap (MTD − SO) ·
 SO / Proj % · Proj / SO % · Proj vs SO % · Mismatch % · Status.
